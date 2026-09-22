@@ -1,7 +1,7 @@
 # FLFP
 
 快速、可微分的光场 PSF 模型，用于三维物体与波前联合重建。
-本仓库对应论文 *A Fast, Differentiable Representation of Light-Field Point-Spread Functions* 的主图 1–3。
+本仓库对应论文 *A Fast, Differentiable Representation of Light-Field Point-Spread Functions*
 
 ## 快速开始
 
