@@ -39,15 +39,15 @@ github/
 ├── autograd/                              # 光学模型和重建
 │   ├── demo_wavefront.py                   # 单文件 Joint demo，修改任务的入口
 │   ├── demo_wdao.py                        # 同一观测的 wDAO 对照
-│   ├── batch_points_poisson_gaussian.py    # 主图 3 的 50 例 Joint 批量实验
+│   ├── batch_points_poisson_gaussian.py    # 50 例 Joint 批量实验
 │   ├── lfpsf_torch_shift_blur_batched.py    # 默认使用的可微 PSF 模型
 │   ├── lfpsf_torch_batch5.py               # 原光学模型，供参考
 │   ├── wdao/                              # 位移估计、相位积分和固定波前重建
-│   └── psfsim_timetest/                    # PSF 实现与主图 2 计时
+│   └── psfsim_timetest/                    # PSF 实现与计时
 │       └── benchmark_psf.py               # GPU 计时入口
 ├── data/                                  # 数据说明见 data/README.md
 │   ├── points/                            # 散点真值体数据和坐标
-│   ├── reference/                         # Sample 2 原始 LF、干净 LF 和波前真值
+│   ├── reference/                         # Sample 原始 LF、干净 LF 和波前真值
 │   ├── benchmarks/                        # PyTorch / MATLAB 的逐次 PSF 耗时
 │   └── metrics/                           # 50 对 Joint/wDAO 数值结果、定位坐标和参数
 ├── scripts/
