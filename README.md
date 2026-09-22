@@ -59,13 +59,13 @@ github/
 ## 其他实验
 
 ```bash
-# 主图 3：wDAO 对照，使用 24 GiB GPU
+# wDAO 
 CUDA_VISIBLE_DEVICES=0 python autograd/demo_wdao.py
 
-# 主图 3：10 组像差 × 5 个光子等级
+# 10 组像差 × 5 个光子等级
 CUDA_VISIBLE_DEVICES=0 python autograd/batch_points_poisson_gaussian.py
 
-# 主图 2：PSF 计时
+# PSF 计时
 CUDA_VISIBLE_DEVICES=0 python autograd/psfsim_timetest/benchmark_psf.py \
   --output outputs/psf_benchmark --gpu 0 --threads 4 --warmups 10 --repeats 10 \
   --methods traditional shift_fresnel_precomputed shift_blur_batched
@@ -79,4 +79,4 @@ CUDA_VISIBLE_DEVICES=0 python autograd/psfsim_timetest/benchmark_psf.py \
 python scripts/evaluate_localization.py
 ```
 
-定位默认评价 Joint 输出，接受条件为每个坐标误差 ≤6 µm；`--volume` 可选择其他重建体。
+定位默认评估 Joint 输出，接受条件为每个坐标误差 ≤6 µm；`--volume` 可选择其他重建体。
