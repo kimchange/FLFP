@@ -20,15 +20,15 @@ CUDA_VISIBLE_DEVICES=0 python autograd/demo_wavefront.py
 
 修改 `demo_wavefront.py` 顶部的配置：
 
-| 配置 | 设置内容 |
-| --- | --- |
-| `DATA`、`PHYSICAL_VIEWS` | 原始 LF `[view,y,x]` 和视角顺序；保留传感器偏置与原始强度 |
-| `VOLUME_SHAPE`、`OPTICS` | 重建网格与光学参数，光学长度单位为 m |
-| `PSF_SIZE`、`SAMPLE_STRIDE`、`MODES` | PSF 支持、采样间隔和波前模式数 |
-| `BIAS`、`READ_VARIANCE` | 传感器偏置和读出噪声方差 |
-| `STEPS`、`LR_*`、`REGULARIZATION` | 优化步数、学习率和正则强度 |
-| `TRUE_WF`、`CLEAN_LF` | 可选评价参考；自己的数据可设为 `None` |
-| `INTENSITY_SCALE` | 输出单位换算系数；设为 `1` 时保留光子单位 |
+| 配置                                       | 设置内容                                                   |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| `DATA`、`PHYSICAL_VIEWS`               | 原始 LF`[view,y,x]` 和视角顺序；保留传感器偏置与原始强度 |
+| `VOLUME_SHAPE`、`OPTICS`               | 重建网格与光学参数，光学长度单位为 m                       |
+| `PSF_SIZE`、`SAMPLE_STRIDE`、`MODES` | PSF 支持、采样间隔和波前模式数                             |
+| `BIAS`、`READ_VARIANCE`                | 传感器偏置和读出噪声方差                                   |
+| `STEPS`、`LR_*`、`REGULARIZATION`    | 优化步数、学习率和正则强度                                 |
+| `TRUE_WF`、`CLEAN_LF`                  | 可选评价参考；自己的数据可设为`None`                     |
+| `INTENSITY_SCALE`                        | 输出单位换算系数；设为`1` 时保留光子单位                 |
 
 自定义观测模型或先验，分别修改 `data_loss()` 和 `spatial_penalty()`。体数据与 LF 默认保存为 float32。
 
@@ -73,7 +73,7 @@ CUDA_VISIBLE_DEVICES=0 python autograd/psfsim_timetest/benchmark_psf.py \
 
 方法与参数：[wDAO](autograd/wdao/README.md) · [PSF 计时](autograd/psfsim_timetest/README_benchmark.md) · [数据说明](data/README.md)
 
-## 定位评价
+## 三维定位评估
 
 ```bash
 python scripts/evaluate_localization.py
