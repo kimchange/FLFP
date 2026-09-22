@@ -1,0 +1,62 @@
+{
+  "method": "RUSH3D-wDAO adaptation",
+  "version": "physical-staged-wdao-v1",
+  "public_repository": "https://github.com/yuanlong-o/RUSH3D",
+  "loop_commit": "13923b3fbf3c0afec950e7645b4e604000fae6d9",
+  "loop_path": "v0.1/reconstruction/Loop_Phase_Reconstruction",
+  "reconstruction_commit": "4e78e6cbaba3245ad82516526fed329e2a6f3d49",
+  "reconstruction_path": "va.31/reconstruction_module/recon_module.m",
+  "outer_iterations": 10,
+  "initial_inner_epochs": 5,
+  "later_inner_epochs": 3,
+  "reconstruction_update": "Ordered-view relaxed ISRA: X *= 1-r + r*(A^T y)/(A^T A X)",
+  "relaxation": ".4 * observed_view_flux / maximum_observed_view_flux",
+  "volume_initialization": "Uniform at each outer iteration, scaled to observed net positive flux",
+  "image_preprocessing": "Subtract known camera offset 105; clamp negative values to zero for nonnegative ISRA and NCC only",
+  "ncc": "Same-angle predicted vs measured; true zero-mean NCC; Keys bicubic 5x upsampling",
+  "ncc_template_fraction": 0.88,
+  "ncc_search_native_LF_pixels": 5.0,
+  "ncc_resolution_native_LF_pixels": 0.2,
+  "alignment": "Subtract center shift, clip, remove radial defocus slope, clip; final NCC must have all 81 channels valid before integration",
+  "phase_update": "Integrate final inner residual shift map; fit 21 OSA modes including nuisance modes; zero 0,1,2,4; add to current wavefront",
+  "integration": "Exact expected departure-node integral over shortest Manhattan paths; 135x135 grid",
+  "coordinates": "Physical normalized pupil coordinates; measured convex hull only; linear gradient interpolation",
+  "optical_settings": {
+    "M": 7.85,
+    "MLPitch": 5.64e-05,
+    "Nnum": 15,
+    "fml": 0.00044415,
+    "na_detection": 0.5,
+    "lam_detection": 5.25e-07,
+    "lf_samples_per_microlens": 3
+  },
+  "fixed_psf_size": 225,
+  "volume_shape": [
+    101,
+    675,
+    675
+  ],
+  "raw_lf_shape": [
+    81,
+    135,
+    135
+  ],
+  "gauge_excluded": [
+    0,
+    1,
+    2,
+    4
+  ],
+  "final_reconstruction_steps": 2300,
+  "adaptations": [
+    "One common pupil instead of spatial patches",
+    "Matched sampled diffraction forward/adjoint and ideal fixed shifts",
+    "Physical optical conversion replaces historical ratio=4",
+    "Linear valid-hull interpolation replaces angular zero-padding/bicubic/nearest resizing",
+    "Exact path expectation replaces 1000 stochastic paths",
+    "Matched 21 OSA slots, 17 free modes, replaces historical 45 unnormalized coefficients",
+    "Search +/-25 upsampled pixels matches original clip; replaces public example search margin 9",
+    "Matched final fixed-WF optimizer isolates wavefront-estimation difference"
+  ],
+  "ground_truth_access": "None during estimation; only original lf.tiff is read"
+}

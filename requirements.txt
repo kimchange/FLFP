@@ -1,0 +1,5 @@
+# Python 3.10; original reconstruction used torch 2.9.1+cu130.
+torch==2.9.1
+numpy==2.2.6
+scipy==1.15.3
+tifffile==2025.2.18

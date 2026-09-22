@@ -1,0 +1,44 @@
+{
+  "parameters": [
+    {
+      "parameter": 1,
+      "NA": 1.05,
+      "MLPitch": 5.64e-05,
+      "Nnum": 15,
+      "OSR": 3,
+      "n": 1.406,
+      "fml": 0.0005364,
+      "M": 20,
+      "lambda": 5.25e-07,
+      "zmax": 2.9999999999999997e-05,
+      "zmin": -2.9999999999999997e-05,
+      "zspacing": 6e-07,
+      "python_output_side": 375,
+      "precision": "single",
+      "quadrature_order": 1024
+    },
+    {
+      "parameter": 2,
+      "NA": 0.5,
+      "MLPitch": 5.64e-05,
+      "Nnum": 15,
+      "OSR": 3,
+      "n": 1,
+      "fml": 0.00044415,
+      "M": 7.85,
+      "lambda": 5.25e-07,
+      "zmax": 0.00025,
+      "zmin": -0.00025,
+      "zspacing": 5e-06,
+      "python_output_side": 765,
+      "precision": "single",
+      "quadrature_order": 1024
+    }
+  ],
+  "precision": "single",
+  "quadrature_order": 1024,
+  "repetitions_per_parameter": 10,
+  "full_warmups": 10,
+  "warmups": 10,
+  "gpu_name": "NVIDIA GeForce RTX 3090"
+}

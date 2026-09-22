@@ -1,0 +1,27 @@
+{
+  "original_repository_commit": "de44a2a7eecad289d31568121dde2b8875d00441",
+  "precision": "single",
+  "quadrature_order": 1024,
+  "repetitions_per_parameter": 10,
+  "full_psf_warmups": 10,
+  "timing": "Synchronized wall time. Init includes fresh quadrature setup, support search and MLA. Generation includes GPU Debye integration, all 225 source propagations, normalization, thresholding and phase-space rearrangement for 101 depths. Per-depth validation, diagnostic gather and benchmark logging are outside summed generation intervals.",
+  "startup": "One MATLAB process; GPU runtime startup outside optical timers. For each parameter, all full warmups precede all formal measurements. Each run clears debye_gpu and rebuilds optical setup; normal runtime/FFT caches persist. Reuse prior numerical validation after verifying identical optical source and identical timed statements.",
+  "representation": "One depth at a time remains on GPU; full 101-depth stack is not assembled or exported.",
+  "changes": [
+    "Single precision on same RTX 3090 as PyTorch.",
+    "Original Debye integrand evaluated by batched Gauss-Legendre GPU quadrature, validated against original CPU adaptive integral and doubled quadrature order.",
+    "Original zero-padded shifts, Fresnel FFTs and per-call transfer-function construction retained.",
+    "Normalization reductions and phase-space index reassignment vectorized; depth order streamed.",
+    "Original square MLA, adaptive support, +1 nm depth offset and 0.005 threshold retained."
+  ],
+  "documentation": [
+    "https://www.mathworks.com/help/parallel-computing/gpuarray.html",
+    "https://www.mathworks.com/help/parallel-computing/parallel.gpu.gpudevice.wait.html"
+  ],
+  "ordering": "parameter 1 warmups, parameter 1 measurements, parameter 2 warmups, parameter 2 measurements",
+  "statistics": "Warmup and measurement phases kept separate; mean, sample SD (ddof=1), median, min, max.",
+  "historical_once_run_included_in_statistics": false,
+  "single_view_divisor": 1,
+  "timed_blocks_identical_to_validated_once": true,
+  "gpu_name": "NVIDIA GeForce RTX 3090"
+}

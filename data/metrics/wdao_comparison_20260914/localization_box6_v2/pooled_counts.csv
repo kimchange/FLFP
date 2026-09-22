@@ -1,0 +1,11 @@
+group,method,photons,cases,pooled_candidates,pooled_accepted,mean_count,mean_fraction,minimum_count,maximum_count
+wdao_comparison,wdao,10,10,1000,489,48.9,0.489,19,61
+wdao_comparison,wdao,30,10,1000,891,89.1,0.8909999999999999,84,94
+wdao_comparison,wdao,100,10,1000,996,99.6,0.996,98,100
+wdao_comparison,wdao,300,10,1000,1000,100.0,1.0,100,100
+wdao_comparison,wdao,1000,10,1000,996,99.6,0.996,96,100
+wdao_comparison,joint,10,10,1000,492,49.2,0.49200000000000005,36,59
+wdao_comparison,joint,30,10,1000,909,90.9,0.909,86,97
+wdao_comparison,joint,100,10,1000,999,99.9,0.9990000000000001,99,100
+wdao_comparison,joint,300,10,1000,1000,100.0,1.0,100,100
+wdao_comparison,joint,1000,10,1000,1000,100.0,1.0,100,100

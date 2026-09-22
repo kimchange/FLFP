@@ -1,0 +1,141 @@
+{
+  "version": "box6-v2",
+  "definition": "max(abs(estimate_xyz - truth_xyz)) <= 6 micrometres in physical coordinates; inclusive",
+  "tolerance_each_axis_um": 6,
+  "box_full_side_lengths_um": [
+    12,
+    12,
+    12
+  ],
+  "peak_selection": "100 strongest unsmoothed 3x3x3 local maxima; deterministic intensity/index tie-break",
+  "assignment": "One-to-one assignment minimizing total physical Euclidean distance, evaluated before the coordinate-wise box test",
+  "geometry": "coordinate-wise box, not Euclidean radius",
+  "known_emitter_count": 100,
+  "registration_applied": false,
+  "subvoxel_refinement": false,
+  "case_rows": 100,
+  "unique_reconstruction_count": 100,
+  "reporting": "Counts per 100; pooled counts across ten reconstructions of the same object have denominator 1000; reconstruction is the statistical unit",
+  "pooled_counts": [
+    {
+      "group": "wdao_comparison",
+      "method": "wdao",
+      "photons": 10,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 489,
+      "mean_count": 48.9,
+      "mean_fraction": 0.489,
+      "minimum_count": 19,
+      "maximum_count": 61
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "wdao",
+      "photons": 30,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 891,
+      "mean_count": 89.1,
+      "mean_fraction": 0.8909999999999999,
+      "minimum_count": 84,
+      "maximum_count": 94
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "wdao",
+      "photons": 100,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 996,
+      "mean_count": 99.6,
+      "mean_fraction": 0.996,
+      "minimum_count": 98,
+      "maximum_count": 100
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "wdao",
+      "photons": 300,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 1000,
+      "mean_count": 100.0,
+      "mean_fraction": 1.0,
+      "minimum_count": 100,
+      "maximum_count": 100
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "wdao",
+      "photons": 1000,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 996,
+      "mean_count": 99.6,
+      "mean_fraction": 0.996,
+      "minimum_count": 96,
+      "maximum_count": 100
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "joint",
+      "photons": 10,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 492,
+      "mean_count": 49.2,
+      "mean_fraction": 0.49200000000000005,
+      "minimum_count": 36,
+      "maximum_count": 59
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "joint",
+      "photons": 30,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 909,
+      "mean_count": 90.9,
+      "mean_fraction": 0.909,
+      "minimum_count": 86,
+      "maximum_count": 97
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "joint",
+      "photons": 100,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 999,
+      "mean_count": 99.9,
+      "mean_fraction": 0.9990000000000001,
+      "minimum_count": 99,
+      "maximum_count": 100
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "joint",
+      "photons": 300,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 1000,
+      "mean_count": 100.0,
+      "mean_fraction": 1.0,
+      "minimum_count": 100,
+      "maximum_count": 100
+    },
+    {
+      "group": "wdao_comparison",
+      "method": "joint",
+      "photons": 1000,
+      "cases": 10,
+      "pooled_candidates": 1000,
+      "pooled_accepted": 1000,
+      "mean_count": 100.0,
+      "mean_fraction": 1.0,
+      "minimum_count": 100,
+      "maximum_count": 100
+    }
+  ]
+}

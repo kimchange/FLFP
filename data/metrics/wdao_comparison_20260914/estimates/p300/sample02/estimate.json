@@ -1,0 +1,13 @@
+{
+  "status": "complete",
+  "job_id": "p300/sample02",
+  "photons": 300,
+  "index": 2,
+  "method": "RUSH3D-wDAO adaptation",
+  "iterations": 10,
+  "estimate_s": 51.845041228458285,
+  "peak_allocated_bytes": 17403410944,
+  "truth_loaded": false,
+  "input_units": "Known camera offset subtracted; negative net values clipped for ISRA/NCC",
+  "wavefront_units": "21 OSA normalized coefficients in waves; excluded 0,1,2,4"
+}

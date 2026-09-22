@@ -1,0 +1,13 @@
+{
+  "index": 1,
+  "name": "rms1_len21_01",
+  "photons": 100,
+  "coefficient": 0.5829866912756507,
+  "clean_lf_max": 171.53050231933594,
+  "expected_photon_max": 100.0,
+  "expected_photon_mean": 1.1725850105285645,
+  "gaussian_empirical_mean": 104.99864049568494,
+  "gaussian_empirical_variance": 8.989349657268901,
+  "corrected_negative_fraction": 0.41700756549835205,
+  "poisson_residual_mean": 6.151670305086524e-05
+}

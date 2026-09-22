@@ -1,0 +1,11 @@
+outputs/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+/github.zip

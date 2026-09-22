@@ -3,7 +3,7 @@ import torch
 import tifffile
 # dtype = torch.cuda.FloatTensor
 
-
+from typing import Dict, Optional, Sequence, Tuple, Union
 import torch
 import math
 
@@ -78,18 +78,23 @@ def generate_analytical_derivative_matrices(C=21, device='cpu'):
 
 class PsfGenerator5D:
     
-    def __init__(self, lfpsf_shape=(13,13,1,351,351), MLPitch=100e-6, dz=0.2e-6, xy_downsample = 1, M = 63, lam_detection=525e-9, n=1.515, na_detection=1.4, fml=2100e-6, Nnum = 13, OSR=3, n_threads=4, device='cuda:0', zernike_coef_in_lambda=True, input_views=None):
+    def __init__(self, lfpsf_shape=(13,13,1,351,351), MLPitch=100e-6, dz=0.2e-6, xy_downsample = 1, M = 63, lam_detection=525e-9, n=1.515, na_detection=1.4, fml=2100e-6, Nnum = 13, OSR=3, n_threads=4, device='cuda:0', zernike_coef_in_lambda=True, input_views=None, circle_aperture=True):
         
         lfpsf_shape = tuple(lfpsf_shape) 
         psf_shape = (lfpsf_shape[-3], lfpsf_shape[-2]*OSR, lfpsf_shape[-1]*OSR)
+        self.real_dtype = torch.float32
+
 
 
         self.Nz, self.Ny, self.Nx = psf_shape
         self.dz, self.dy, self.dx = dz, MLPitch / Nnum / M /OSR, MLPitch / Nnum / M /OSR
+        self.fml = fml
+        self.circle_aperture = circle_aperture
+        self.complex_dtype = torch.complex64
         
         self.na_detection = na_detection
         self.lam_detection = lam_detection
-        self.device = device
+        self.device = torch.device(device)
         self.xy_downsample = xy_downsample
 
         self.n = n
@@ -99,55 +104,162 @@ class PsfGenerator5D:
         self.pixelPitch = MLPitch / Nnum
         dtype = torch.float32
 
-        self.k = torch.tensor( [2 * torch.pi / lam_detection], device=device, dtype=torch.float32)
+        self.k = torch.tensor(
+                    2 * torch.pi / self.lam_detection,
+                    device=self.device,
+                    dtype=self.real_dtype,
+                )
         self.hw_index = torch.fft.ifftshift(torch.arange(self.Nx//self.xy_downsample, device=self.device) - self.Nx//self.xy_downsample // 2)
         
-        kx = torch.fft.fftfreq(self.Nx, self.dx).type(dtype).to(device)[self.hw_index]
-        ky = torch.fft.fftfreq(self.Ny, self.dy).type(dtype).to(device)[self.hw_index]
+        # kx = torch.fft.fftfreq(self.Nx, self.dx, device=self.device, dtype=dtype)[self.hw_index]
+        # ky = torch.fft.fftfreq(self.Ny, self.dy, device=self.device, dtype=dtype)[self.hw_index]
 
-        z = self.dz * (torch.arange(self.Nz) - self.Nz // 2)
-        z = z.type(dtype).to(device)
+        # z = self.dz * (torch.arange(self.Nz, device=self.device, dtype=self.real_dtype) - self.Nz // 2)
 
-        KZ3, KY3, KX3 = torch.meshgrid(z, ky, kx, indexing="ij")
-        KR3 = torch.sqrt(KX3 ** 2 + KY3 ** 2)
 
-        # the cutoff in fourier domain (coherent cutoff)
-        self.kcut = 1. * na_detection / self.lam_detection
+        # KZ3, KY3, KX3 = torch.meshgrid(z, ky, kx, indexing="ij")
+        # KR3 = torch.sqrt(KX3 ** 2 + KY3 ** 2)
+
+        # # the cutoff in fourier domain (coherent cutoff)
+        # self.kcut = 1. * na_detection / self.lam_detection
         
-        kmask3 = (KR3 <= self.kcut).type(dtype).to(device)# [:, self.hw_index, :][:, :, self.hw_index]
+        # kmask3 = (KR3 <= self.kcut).type(dtype).to(device)# [:, self.hw_index, :][:, :, self.hw_index]
 
-        H = torch.sqrt(1. * self.n ** 2 - KR3 ** 2 * lam_detection ** 2).type(dtype).to(device)
+        # H = torch.sqrt(1. * self.n ** 2 - KR3 ** 2 * lam_detection ** 2).type(dtype).to(device)
 
-        # self._H = H
 
-        out_ind = torch.isnan(H)
+        # out_ind = torch.isnan(H)
         
-        # self.kprop = torch.exp(-2.j * torch.pi / lam_detection * self.KZ3  * H) # why -2.j not 2.j
-        kprop = torch.exp(2.j * torch.pi / lam_detection * KZ3  * H) # why -2.j not 2.j
-        kprop[out_ind] = 0.
+        # # self.kprop = torch.exp(-2.j * torch.pi / lam_detection * self.KZ3  * H) # why -2.j not 2.j
+        # kprop = torch.exp(2.j * torch.pi / lam_detection * KZ3  * H) # why -2.j not 2.j
+        # kprop[out_ind] = 0.
 
-        self.kbase = kmask3 * kprop# [:, self.hw_index, :][:, :, self.hw_index]
-        # self.kbase = self.fresnel2d(self.kbase, self.pixelPitch / OSR, -fml, self.k, device=device)
-        self.energy_ratio_complex = ( torch.sum(kmask3) / torch.numel(kmask3) ) ** 0.5
+        # self.kbase = kmask3 * kprop# [:, self.hw_index, :][:, :, self.hw_index]
+        # # self.kbase = self.fresnel2d(self.kbase, self.pixelPitch / OSR, -fml, self.k, device=device)
+        # self.energy_ratio_complex = ( torch.sum(kmask3) / torch.numel(kmask3) ) ** 0.5
 
-        KY2, KX2 = torch.meshgrid(ky, kx, indexing="ij")
-        KR2 = torch.hypot(KX2, KY2)
+        # KY2, KX2 = torch.meshgrid(ky, kx, indexing="ij")
+        # KR2 = torch.hypot(KX2, KY2)
 
-        self.krho = KR2 / self.kcut
-        self.kphi = torch.arctan2(KY2, KX2)
-        self.kmask2 = (KR2 <= self.kcut)
+        # self.krho = KR2 / self.kcut
+        # self.kphi = torch.arctan2(KY2, KX2)
+        # self.kmask2 = (KR2 <= self.kcut)
+
+        # A single 2-D objective-frequency grid is broadcast over depth. This
+        # replaces the original KZ3/KY3/KX3 tensors.
+        kx = torch.fft.fftfreq(
+            self.Nx, d=self.dx, device=self.device, dtype=self.real_dtype
+        )[self.hw_index]
+        ky = torch.fft.fftfreq(
+            self.Ny, d=self.dy, device=self.device, dtype=self.real_dtype
+        )[self.hw_index]
+        ky_grid, kx_grid = torch.meshgrid(ky, kx, indexing="ij")
+        radial_frequency = torch.hypot(kx_grid, ky_grid)
+
+        self.kcut = self.na_detection / self.lam_detection
+        self.kmask2 = radial_frequency <= self.kcut
+        self.kmask3 = self.kmask2.unsqueeze(0).expand(self.Nz, -1, -1)
+        self.krho = radial_frequency / self.kcut
+        self.kphi = torch.atan2(ky_grid, kx_grid)
+        axial_argument = (
+            self.n**2 - radial_frequency.square() * self.lam_detection**2
+        )
+        self._H = torch.sqrt(torch.clamp(axial_argument, min=0.0))
+        z = self.dz * (
+            torch.arange(self.Nz, device=self.device, dtype=self.real_dtype)
+            - self.Nz // 2
+        )
+        self.z = z
+        self.kprop = torch.exp(
+            2j
+            * torch.pi
+            / self.lam_detection
+            * z[:, None, None]
+            * self._H[None, :, :]
+        )
+        self.kbase = self.kmask2.to(self.real_dtype).unsqueeze(0) * self.kprop
+        self.energy_ratio_complex = torch.sqrt(
+            self.kmask2.to(self.real_dtype).mean()
+        )
+        phase_angular_spectrum = -self._H[self.kmask2]
+        self.rms_H = torch.sqrt(
+            torch.mean(
+                (
+                    phase_angular_spectrum
+                    - phase_angular_spectrum.mean()
+                ).square()
+            )
+        )
+        self.zernike_coef_in_lambda = zernike_coef_in_lambda
+
+        self.phase_angular_spectrum = -self._H / self.rms_H 
+        self.phase_angular_spectrum[self.kmask2==False] = 0
+
+        self.dz_rms = dz * self.rms_H / lam_detection # to make one pixel shift in depth 
 
         
-        x1space = self.pixelPitch / OSR * (torch.arange(self.Ny) - self.Ny // 2)
-        x2space = self.pixelPitch / OSR * (torch.arange(self.Nx) - self.Nx // 2)
-        x1MLspace = self.pixelPitch / OSR * (torch.arange(-(Nnum*OSR // 2), Nnum*OSR // 2 + 1))
-        x2MLspace = self.pixelPitch / OSR * (torch.arange(-(Nnum*OSR // 2), Nnum*OSR // 2 + 1))
+        # Image-plane coordinates used for the periodic modulation and sensor
+        # propagation, matching the original implementation.
+        modulation_dx = self.pixelPitch / self.OSR
+        x1space = modulation_dx * (
+            torch.arange(self.Ny, device=self.device, dtype=self.real_dtype)
+            - self.Ny // 2
+        )
+        x2space = modulation_dx * (
+            torch.arange(self.Nx, device=self.device, dtype=self.real_dtype)
+            - self.Nx // 2
+        )
+        cell_samples = self.Nnum * self.OSR
+        x1MLspace = modulation_dx * (
+            torch.arange(
+                -(cell_samples // 2),
+                cell_samples // 2 + 1,
+                device=self.device,
+                dtype=self.real_dtype,
+            )
+        )
+        x2MLspace = modulation_dx * (
+            torch.arange(
+                -(cell_samples // 2),
+                cell_samples // 2 + 1,
+                device=self.device,
+                dtype=self.real_dtype,
+            )
+        )
 
-        self.MLARRAY = self.calcML(fml, 2.0 * torch.pi / lam_detection,
-                                  x1MLspace, x2MLspace, x1space, x2space, 
-                                  circle_aperture=True).to(device)
 
-        self.fresnel_2dkernel = self.get_fresnel2dkernel(self.Nx, self.Ny, self.pixelPitch / OSR, fml, self.k, device=device)
+        self.MLARRAY = self.calcML(
+            self.fml,
+            self.k,
+            x1MLspace,
+            x2MLspace,
+            x1space,
+            x2space,
+            circle_aperture=self.circle_aperture,
+        ).to(device=self.device, dtype=self.complex_dtype)
+
+        self.fresnel_2dkernel = self.get_fresnel2dkernel(
+            self.Nx,
+            self.Ny,
+            modulation_dx,
+            self.fml,
+            self.k,
+            device=self.device,
+        )
+        self.myzifftn = lambda value: torch.fft.ifftn(
+            value, dim=(-2, -1)
+        )
+
+        # x1space = self.pixelPitch / OSR * (torch.arange(self.Ny) - self.Ny // 2)
+        # x2space = self.pixelPitch / OSR * (torch.arange(self.Nx) - self.Nx // 2)
+        # x1MLspace = self.pixelPitch / OSR * (torch.arange(-(Nnum*OSR // 2), Nnum*OSR // 2 + 1))
+        # x2MLspace = self.pixelPitch / OSR * (torch.arange(-(Nnum*OSR // 2), Nnum*OSR // 2 + 1))
+
+        # self.MLARRAY = self.calcML(fml, 2.0 * torch.pi / lam_detection,
+        #                           x1MLspace, x2MLspace, x1space, x2space, 
+        #                           circle_aperture=True).to(device)
+
+        # self.fresnel_2dkernel = self.get_fresnel2dkernel(self.Nx, self.Ny, self.pixelPitch / OSR, fml, self.k, device=device)
 
 
         # uv_mla = torch.roll(self.MLARRAY, shifts=(int((u-Nnum//2)*self.OSR), int((v-Nnum//2)*self.OSR)), dims=(0,1))  # shift in spatial domain <=> phase ramp in Fourier domain
@@ -172,21 +284,7 @@ class PsfGenerator5D:
 
         self.myzifftn = lambda x: torch.fft.ifftn(x, dim=(-2,-1))
 
-        phase_angular_spectrum = -H[0][self.kmask2]
 
-        if zernike_coef_in_lambda:
-            self.rms_H = ( ((phase_angular_spectrum - phase_angular_spectrum.mean())**2 ).sum() / phase_angular_spectrum.numel() )** 0.5 
-        else:
-            self.rms_H = ( ((phase_angular_spectrum - phase_angular_spectrum.mean())**2 ).sum() / phase_angular_spectrum.numel() )** 0.5 
-
-        self.zernike_coef_in_lambda = zernike_coef_in_lambda
-
-        self.phase_angular_spectrum = -H[0] / self.rms_H 
-        self.phase_angular_spectrum[self.kmask2==False] = 0
-
-        self.dz_rms = dz * self.rms_H / lam_detection # to make one pixel shift in depth 
-
-        
 
     
     def zernike_polynomial(self, idx, normalized = True):
@@ -473,6 +571,22 @@ class PsfGenerator5D:
         # return res
         return shift_int // psf_binning, res  # downsample to original size
 
+    def coherent_psf_shifted(self, a, d, phi, normalized=False, piston_tip_tilt=False, psf_binning=3, shift_fixed=None):
+        # shift_fixed is after binning
+
+        uv_mla_fresnel = self.uv_mla_fresnel[a,:,:]
+        
+        if phi is None:
+            uv_mla_fresnel_phi = self.apply_known_int_shift(uv_mla_fresnel.unsqueeze(1)  , torch.fft.fftshift( -2*torch.pi * (self.phase_angular_spectrum.unsqueeze(0).unsqueeze(0) * d.reshape(1,-1,1,1) * self.dz_rms) ,dim=(-2,-1)) , psf_binning=psf_binning, shift_int = shift_fixed)
+        else:
+            phi = self.masked_phase_array(phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt)
+            uv_mla_fresnel_phi = self.apply_known_int_shift(uv_mla_fresnel.unsqueeze(1)  , torch.fft.fftshift( -2*torch.pi * (self.phase_angular_spectrum.unsqueeze(0).unsqueeze(0) * d.reshape(1,-1,1,1) * self.dz_rms + phi.unsqueeze(0).unsqueeze(0) ) ,dim=(-2,-1)) , psf_binning=psf_binning, shift_int = shift_fixed)
+
+        ku = torch.fft.fftshift( self.kbase.unsqueeze(0), dim=(-2,-1)) * uv_mla_fresnel_phi
+        res = compute_centered_psf_mft_downsampled(ku, out_size=(225 , 225 ) , down_factor=psf_binning) * (psf_binning / self.energy_ratio_complex)
+
+        return res  # downsample to original size
+
 
     def calcRMS(self, phi, normalized=False, piston_tip_tilt=False):
         phase = self.masked_phase_array(phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt)
@@ -481,78 +595,108 @@ class PsfGenerator5D:
         rms = ( ((phase - phase.mean())**2 ).sum() / phase.numel() )** 0.5
         return rms
 
-    def incoherent_psf(self, a, d, phi, normalized=False, piston_tip_tilt=False, psf_binning=3):
-        shift_int, _psf = self.coherent_psf(a, d, phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt, psf_binning=psf_binning)
-        _psf = torch.abs(_psf) ** 2
-        # _psf /= torch.sum(_psf, dim = (1, 2), keepdim = True)
-        return shift_int, _psf
+    def incoherent_psf(self, a, d, phi, normalized=False, piston_tip_tilt=False, psf_binning=3, shift_fixed=None):
+        if shift_fixed is not None:
+            _psf = self.coherent_psf_shifted(a, d, phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt, psf_binning=psf_binning, shift_fixed=shift_fixed)
+            _psf = torch.abs(_psf) ** 2
+            return shift_fixed, _psf
+        else:
+            shift_int, _psf = self.coherent_psf(a, d, phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt, psf_binning=psf_binning)
+            _psf = torch.abs(_psf) ** 2
+            # _psf /= torch.sum(_psf, dim = (1, 2), keepdim = True)
+            return shift_int, _psf
 
 
     @staticmethod
-    def calcML(fml, k, x1MLspace, x2MLspace, x1space, x2space, circle_aperture):
-        # # 转为torch tensor
-        # x1space = torch.tensor(x1space)
-        # x2space = torch.tensor(x2space)
-        # x1MLspace = torch.tensor(x1MLspace)
-        # x2MLspace = torch.tensor(x2MLspace)
+    def calcML(
+        fml: float,
+        k: Union[float, torch.Tensor],
+        x1MLspace: torch.Tensor,
+        x2MLspace: torch.Tensor,
+        x1space: torch.Tensor,
+        x2space: torch.Tensor,
+        circle_aperture: bool,
+    ) -> torch.Tensor:
+        """Construct a periodic MLA without Python loops or sparse convolution."""
 
-        x1length = x1space.numel()
-        x2length = x2space.numel()
-        x1MLdist = x1MLspace.numel()
-        x2MLdist = x2MLspace.numel()
+        device = x1space.device
+        real_dtype = x1space.dtype
+        wave_number = torch.as_tensor(
+            k, device=device, dtype=real_dtype
+        ).reshape(())
 
-        # 找中心点
-        x1center = (x1space == 0).nonzero(as_tuple=True)[0].item()
-        x2center = (x2space == 0).nonzero(as_tuple=True)[0].item()
+        local_y, local_x = torch.meshgrid(
+            x1MLspace.to(device=device, dtype=real_dtype),
+            x2MLspace.to(device=device, dtype=real_dtype),
+            indexing="ij",
+        )
+        cell = torch.exp(
+            -1j
+            * wave_number
+            / (2 * fml)
+            * (local_y.square() + local_x.square())
+        )
 
-        # 构造所有microlens中心
-        x1centerALL = list(range(x1center, -1, -x1MLdist)) + list(range(x1center + x1MLdist, x1length, x1MLdist))
-        x1centerALL = sorted(x1centerALL)
-        x2centerALL = list(range(x2center, -1, -x2MLdist)) + list(range(x2center + x2MLdist, x2length, x2MLdist))
-        x2centerALL = sorted(x2centerALL)
+        if circle_aperture:
+            iy = torch.arange(
+                x1MLspace.numel(), device=device, dtype=real_dtype
+            )
+            ix = torch.arange(
+                x2MLspace.numel(), device=device, dtype=real_dtype
+            )
+            denominator_y = max(x1MLspace.numel() // 2, 1)
+            denominator_x = max(x2MLspace.numel() // 2, 1)
+            normalized_y = iy / denominator_y - 1
+            normalized_x = ix / denominator_x - 1
+            aperture_y, aperture_x = torch.meshgrid(
+                normalized_y, normalized_x, indexing="ij"
+            )
+            cell = cell * (
+                aperture_y.square() + aperture_x.square() <= 1
+            )
 
-        # patternML
-        patternML = torch.zeros((x1MLspace.numel(), x2MLspace.numel()), dtype=torch.cfloat)
-        for a in range(x1MLspace.numel()):
-            for b in range(x2MLspace.numel()):
-                x1 = x1MLspace[a]
-                x2 = x2MLspace[b]
-                xL2norm = x1**2 + x2**2
-                if circle_aperture:
-                    val = ((a) / (x1MLspace.numel()//2) - 1)**2 + ((b) / (x2MLspace.numel()//2) - 1)**2 <= 1
-                    patternML[a, b] = torch.exp(-1j * k / (2 * fml) * xL2norm) * float(val)
-                else:
-                    patternML[a, b] = torch.exp(-1j * k / (2 * fml) * xL2norm)
+        center_y = int(torch.argmin(x1space.abs()))
+        center_x = int(torch.argmin(x2space.abs()))
+        cell_center_y = x1MLspace.numel() // 2
+        cell_center_x = x2MLspace.numel() // 2
 
-        # MLcenters
-        MLspace = torch.zeros((x1length, x2length), dtype=torch.complex64)
-        MLcenters = MLspace.clone()
-        for a in x1centerALL:
-            for b in x2centerALL:
-                MLcenters[a, b] = 1
+        indices_y = (
+            torch.arange(x1space.numel(), device=device)
+            - center_y
+            + cell_center_y
+        ) % x1MLspace.numel()
+        indices_x = (
+            torch.arange(x2space.numel(), device=device)
+            - center_x
+            + cell_center_x
+        ) % x2MLspace.numel()
+        return cell[indices_y[:, None], indices_x[None, :]]
 
-        # 2D卷积
-        MLARRAY = torch.nn.functional.conv2d(
-            MLcenters.unsqueeze(0).unsqueeze(0),  # [1,1,H,W]
-            patternML.unsqueeze(0).unsqueeze(0).flip(-2, -1),  # [1,1,h,w], flip for conv2d
-            padding='same'
-        )[0,0]
-
-        return MLARRAY
     @staticmethod
-    def get_fresnel2dkernel(Nx, Ny, dx0, z, k, device='cpu'):
-
-        # 使用torch.fft.fftfreq生成u和v
-        u = torch.fft.fftfreq(Nx, d=dx0).to(device)
-        v = torch.fft.fftfreq(Ny, d=dx0).to(device)
-
-        # 生成网格
-        V, U = torch.meshgrid(v, u, indexing='ij')
-
-        H = torch.exp(1j * k * z) * torch.exp(-1j * 2 * torch.pi**2 * (U**2 + V**2) * z / k)
-        h = torch.fft.fftshift(torch.fft.ifft2(H))
-
-        return h
+    def get_fresnel2dkernel(
+        Nx: int,
+        Ny: int,
+        dx0: float,
+        z: float,
+        k: Union[float, torch.Tensor],
+        device: Union[str, torch.device] = "cpu",
+    ) -> torch.Tensor:
+        device = torch.device(device)
+        wave_number = torch.as_tensor(
+            k, device=device, dtype=torch.float32
+        ).reshape(())
+        u = torch.fft.fftfreq(Nx, d=dx0, device=device)
+        v = torch.fft.fftfreq(Ny, d=dx0, device=device)
+        v_grid, u_grid = torch.meshgrid(v, u, indexing="ij")
+        transfer = torch.exp(1j * wave_number * z) * torch.exp(
+            -1j
+            * 2
+            * torch.pi**2
+            * (u_grid.square() + v_grid.square())
+            * z
+            / wave_number
+        )
+        return torch.fft.fftshift(torch.fft.ifft2(transfer))
 
     @staticmethod
     def fresnel2d(x, dx0, z, k, device='cpu'):
@@ -674,7 +818,47 @@ class PsfGenerator5D:
         
         return int_shift, blur_freq
 
+    @staticmethod
+    def apply_known_int_shift(
+        U,
+        Phi,
+        shift_int,
+        is_ifft=True,
+        psf_binning=3,
+    ):
+        """
+        使用已知整数位移生成去除宏观平移后的 blur_freq。
 
+        Args:
+            U: [A, 1, H, W]，复数频域振幅
+            Phi: [1, C, H, W]，相位
+            shift_int: [A, C, 2]，顺序为 (y, x)，单位为降采样后的 PSF 像素
+            is_ifft: 是否采用 IFFT 符号约定
+            psf_binning: PSF 降采样倍率
+
+        Returns:
+            blur_freq: [A, C, H, W]
+        """
+        _, _, H, W = U.shape
+        device = U.device
+        real_dtype = U.real.dtype
+
+        # 恢复到 decouple_shift_unwrapped_slicing 内部使用的高分辨率位移单位。
+        shift = shift_int.detach().to(device=device, dtype=real_dtype)
+        shift_y = shift[..., 0, None, None] * psf_binning
+        shift_x = shift[..., 1, None, None] * psf_binning
+
+        freq_y = (torch.arange(H, device=device, dtype=real_dtype) - H // 2) / H
+        freq_x = (torch.arange(W, device=device, dtype=real_dtype) - W // 2) / W
+
+        Y, X = torch.meshgrid(freq_y, freq_x, indexing="ij")
+        Y = Y[None, None]
+        X = X[None, None]
+
+        fft_sign = -1.0 if is_ifft else 1.0
+        phase_ramp = torch.exp(-1j * fft_sign * 2 * torch.pi* (X * shift_x + Y * shift_y))
+
+        return U * torch.exp(1j * Phi) * phase_ramp
 
 
 def compute_centered_psf_mft_downsampled(blur_freq, out_size=(3, 3), down_factor=5, is_ifft=True):
@@ -745,11 +929,11 @@ def compute_centered_psf_mft_downsampled(blur_freq, out_size=(3, 3), down_factor
 
 if __name__ == "__main__":
     import tifffile,os,time
-    # single_point = torch.empty((13, 13, 101, 351, 351), dtype=torch.float32, device='cuda:0')
-    # lfpsf_shape = (15, 15, 101, 377, 377)
-    
+
+
+    # parameter 1
     Nnum = 15
-    lfpsf_shape = (Nnum, Nnum, 101, 375, 375)
+    lfpsf_shape = (Nnum, Nnum, 1, 375, 375)
     OSR=3
     M=20
     n=1.406
@@ -759,20 +943,12 @@ if __name__ == "__main__":
     lam_detection=525*1e-9
     dz=0.6e-6
     device = 'cuda:0'
-    xy_downsample = 5
+    xy_downsample = 3
+    psf_binning = 1
 
 
-
-    Nnum = 15
-    lfpsf_shape = (Nnum, Nnum, 1, 765, 765)
-    lfpsf_shape = (Nnum, Nnum, 1, 315, 315)
-    lfpsf_shape = (Nnum, Nnum, 1, 675, 675)
-    lfpsf_shape = (Nnum, Nnum, 1, 615, 615)
-    lfpsf_shape = (Nnum, Nnum, 1, 555, 555)
-    # lfpsf_shape = (Nnum, Nnum, 1, 225, 225)
-    # lfpsf_shape = (Nnum, Nnum, 101, 765//3, 765//3)
+    # # parameter 2
     lfpsf_shape = (Nnum, Nnum, 1, 525, 525)
-    # lfpsf_shape = (Nnum, Nnum, 1, 495, 495)
     OSR= 3
     M=7.85
     n=1
@@ -780,21 +956,12 @@ if __name__ == "__main__":
     MLPitch=56.4e-6
     fml=444.15e-6
     lam_detection=525*1e-9
-    dz=6e-6
+    dz=5e-6
     device = 'cuda:0'
     xy_downsample = 3
     psf_binning = 1
 
-    # lfpsf_shape = (13, 13, 101, 377, 377)
-    # Nnum = lfpsf_shape[0]
-    # OSR=3
-    # M=63
-    # n=1.515
-    # na_detection=1.4
-    # MLPitch=100e-6
-    # fml=2100e-6
-    # lam_detection=525*1e-9
-    # dz=0.2e-6
+
 
     # single_point = torch.empty(lfpsf_shape, dtype=torch.float32, device='cpu')
     wf= [ 0.0000e+00,  0.0000e+00,  0.0000e+00, -5.5864e-01,  0.0000e+00,
@@ -802,8 +969,9 @@ if __name__ == "__main__":
          3.2685e-03, -4.8801e-04,  7.7510e-01,  1.0151e-03,  1.1323e-01,
         -4.6229e-02,  1.0003e-02, -1.3905e-01,  8.0669e-02, -3.1488e-02,
         -6.3695e-02]
-    input_views = [112, 113, 128, 127, 126, 111, 96, 97, 98, 99, 114, 129, 144, 143, 142, 141, 140, 125, 110, 95, 80, 81, 82, 83, 84, 85, 100, 115, 130, 145, 160, 159, 158, 157, 156, 155, 154, 139, 124, 109, 94, 79, 64, 65, 66, 67, 68, 69, 70, 71, 86, 101, 116, 131, 146, 161, 175, 174, 173, 172, 171, 170, 169, 153, 138, 123, 108, 93, 78, 63, 49, 50, 51, 52, 53, 54, 55, 117, 187, 107, 37]
+    # input_views = [112, 113, 128, 127, 126, 111, 96, 97, 98, 99, 114, 129, 144, 143, 142, 141, 140, 125, 110, 95, 80, 81, 82, 83, 84, 85, 100, 115, 130, 145, 160, 159, 158, 157, 156, 155, 154, 139, 124, 109, 94, 79, 64, 65, 66, 67, 68, 69, 70, 71, 86, 101, 116, 131, 146, 161, 175, 174, 173, 172, 171, 170, 169, 153, 138, 123, 108, 93, 78, 63, 49, 50, 51, 52, 53, 54, 55, 117, 187, 107, 37]
     # wf = None
+    input_views = list(range(225))
     # input_views = input_views[0:1]
     # input_views = [32]
     t0 = time.time()
@@ -836,12 +1004,20 @@ if __name__ == "__main__":
     kk = dz * lfpsf.rms_H / lam_detection # to make one pixel shift in depth 
 
     # wf[0] =  -24*kk
-    shift_int, tmp = lfpsf.incoherent_psf(aa, z_range[0:blksize], wf, normalized=True, piston_tip_tilt=True, psf_binning=psf_binning)
-    single_point = tmp.cpu()
+    # shift_int, tmp = lfpsf.incoherent_psf(aa, z_range[0:blksize], wf, normalized=True, piston_tip_tilt=True, psf_binning=psf_binning)
+    # single_point = tmp.cpu()
+    # for blk in range(1, (len(z_range)-1) // blksize + 1):
+    #     shift_int_tmp, tmp = lfpsf.incoherent_psf(aa, z_range[blksize*blk:blksize*(blk+1)], wf, normalized=True, piston_tip_tilt=True, psf_binning=psf_binning)
+    #     single_point = torch.cat((single_point, tmp.cpu()), dim=-3)
+    #     shift_int = torch.cat((shift_int, shift_int_tmp), dim=-2)
+
+    blksize = 11
+    shift_int, single_point = lfpsf.incoherent_psf(aa, z_range[0:blksize], wf, normalized=True, piston_tip_tilt=True, psf_binning=psf_binning)
+    # single_point = single_point.cpu()
     for blk in range(1, (len(z_range)-1) // blksize + 1):
         shift_int_tmp, tmp = lfpsf.incoherent_psf(aa, z_range[blksize*blk:blksize*(blk+1)], wf, normalized=True, piston_tip_tilt=True, psf_binning=psf_binning)
-        single_point = torch.cat((single_point, tmp.cpu()), dim=-3)
-        shift_int = torch.cat((shift_int, shift_int_tmp), dim=-2)
+        # single_point = torch.cat((single_point, tmp ), dim=-3)
+        # shift_int = torch.cat((shift_int, shift_int_tmp), dim=-2)
 
     # single_point = single_point.reshape(lfpsf_shape[0:2]+ (single_point.shape[-3], lfpsf_shape[3]//xy_downsample, lfpsf_shape[4]//xy_downsample,))
 
@@ -867,17 +1043,16 @@ if __name__ == "__main__":
     print("psfcalc time cost", t2 - t1)
     print("total time cost", t2 - t0)
 
-    import lf_forward
-    # volume = torch.zeros(1, 101, 675, 675)
-    volume = tifffile.imread('../../../data/rush3d_neuron/synthetic/20260502-beads-ideal/GT_synthetic/group011_MouseTail_depth0.tif')
-    psf = single_point[:,:, :,:]
-    volume = torch.from_numpy( volume.astype(np.float32) ).unsqueeze(0)
-    res = lf_forward.apply_decoupled_psf(volume.cuda(), psf.cuda(), shift_int[:,:, :], method='fft')
+    # import lf_forward
+    # # volume = torch.zeros(1, 101, 675, 675)
+    # psf = single_point[:,:, :,:]
+    # volume = torch.from_numpy( volume.astype(np.float32) ).unsqueeze(0)
+    # res = lf_forward.apply_decoupled_psf(volume.cuda(), psf.cuda(), shift_int[:,:, :], method='fft')
 
-    t3 = time.time()
-    print("imaging time cost", t3 - t2)
-    print("total time cost", t3 - t0)
-    tifffile.imwrite('lf.tiff', res.cpu().numpy())
+    # t3 = time.time()
+    # print("imaging time cost", t3 - t2)
+    # print("total time cost", t3 - t0)
+    # tifffile.imwrite('lf.tiff', res.cpu().numpy())
 
     if False:
         # os.makedirs("./lfpsf", exist_ok=True)
