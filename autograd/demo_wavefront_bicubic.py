@@ -1,4 +1,4 @@
-"""三维物体与波前联合重建 demo：python autograd/demo_wavefront.py。
+"""三维物体与波前联合重建的 bicubic 反传 demo：python autograd/demo_wavefront_bicubic.py。
 
 读取示例光场观测，同时恢复三维物体和波前。
 所有实验步骤都在本文件，仅导入基础光学类；从顶部配置开始适配自己的数据。
@@ -22,7 +22,7 @@ EXAMPLE = ROOT / 'data/reference/points_photons100_sample02'
 DATA = EXAMPLE / 'lf.tiff'                  # 保留传感器偏置，不提前截断负信号
 TRUE_WF = EXAMPLE / 'wf_true.txt'           # 自己的数据没有真值时设为 None
 CLEAN_LF = EXAMPLE / 'lf_clean.tiff'        # 仅用于评估；可设为 None
-OUTPUT = ROOT / 'outputs/demo_wavefront_sample02'
+OUTPUT = ROOT / 'outputs/demo_wavefront_bicubic_sample02'
 DEVICE = 'cuda:0'                          # 可改为 'cpu' 做小规模调试
 VOLUME_SHAPE = (101, 675, 675)              # [z, y, x]；z 坐标默认以中间层为零
 PSF_SIZE, SAMPLE_STRIDE, MODES = 225, 5, 21
@@ -65,6 +65,9 @@ class Projection(torch.nn.Module):
         if not 0 < PSF_SIZE <= min(height, width, *g.krho.shape):
             raise ValueError('PSF_SIZE 必须同时适合横向体网格和光学计算网格。')
         self.shape, self.stride = (height, width), SAMPLE_STRIDE
+        if self.stride < 1 or self.stride % 2 == 0 or any(
+                n % self.stride or n//self.stride < 2 for n in self.shape):
+            raise ValueError('bicubic 需正奇数采样间隔，横向尺寸须为其整数倍且每轴至少两个采样点。')
         depths = torch.arange(nz, dtype=torch.float32, device=device) - nz//2
         # 固定光学量只计算一次。没有读取真实波前或真实物体。
         with torch.no_grad():
@@ -107,7 +110,18 @@ class Projection(torch.nn.Module):
         otf = torch.fft.rfft2(psf, s=self.shape)
         otf = otf*self.otf_y[views, :, :, None]*self.otf_x[views, :, None, :]
         spectrum = (torch.fft.rfft2(volume)[:, None]*otf[None]).sum(2)
-        return torch.fft.irfft2(spectrum, s=self.shape)[..., ::self.stride, ::self.stride]
+        image = torch.fft.irfft2(spectrum, s=self.shape)
+        if image.requires_grad:
+            # 前向采样不变；用周期 bicubic 代理梯度回填，同时作用于物体和波前。
+            def bicubic_backward(grad):
+                residual = torch.nn.functional.pad(
+                    grad[..., ::self.stride, ::self.stride], (2, 2, 2, 2), mode='circular')
+                lifted = torch.nn.functional.interpolate(
+                    residual, scale_factor=self.stride, mode='bicubic', align_corners=False)
+                first = 2*self.stride + self.stride//2  # 对齐原采样位置 0, stride, ...
+                return lifted[..., first:first+self.shape[0], first:first+self.shape[1]]/self.stride**2
+            image.register_hook(bicubic_backward)
+        return image[..., ::self.stride, ::self.stride]
 
 
 # 2. 更换噪声模型或先验时修改这两个函数。
@@ -250,6 +264,7 @@ def main():
     summary.update(steps=STEPS, setup_s=setup_s, solve_s=solve_s,
         input=relative_path(DATA), intensity_scale=INTENSITY_SCALE, device=device.type,
         volume_shape=VOLUME_SHAPE, psf_size=PSF_SIZE, sample_stride=SAMPLE_STRIDE,
+        sampling_backward='periodic_offset0_bicubic',
         physical_views=PHYSICAL_VIEWS, optics=OPTICS, modes=MODES, fixed_modes=FIXED_MODES,
         bias=BIAS, read_variance=READ_VARIANCE, warmup=WARMUP,
         learning_rates=[LR_VOLUME, LR_WAVEFRONT, LR_BACKGROUND],
