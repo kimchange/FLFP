@@ -3,9 +3,7 @@
 A fast, fully differentiable light-field PSF model for joint 3D reconstruction and
 optical calibration.
 
-This release contains a synthetic bead demo and five cropped measured examples
-for joint optical calibration and 3D reconstruction. The full project will be
-released after the paper is accepted.
+This paper is in submission, and paper link will be available here to help understanding the project.
 
 ## Quick start
 
@@ -30,7 +28,7 @@ Both demos save `volume.tiff`, `reprojected_lf.tiff`, `pupil_phase_waves.tiff`,
 `pupil_intensity.tiff`, and `summary.json`. The summary contains run settings,
 optical coefficients, and error metrics. The synthetic pupil intensity is fixed.
 
-For the bead demo, a full run reproduces wavefront RMS error of 
+For the bead demo, a full run reproduces wavefront RMS error of
 approximately **0.013328 waves** and clean light-field
 relative L2 error of **7.79218%**. Validated with the pinned dependencies on an
 RTX 3090: about 6.3 minutes for the full run. Small floating-point differences
