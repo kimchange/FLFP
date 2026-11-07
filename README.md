@@ -3,7 +3,7 @@
 A fast, fully differentiable light-field PSF model for joint 3D reconstruction and
 optical calibration.
 
-This release contains one synthetic bead demo. The full datasets will be released
+This release contains one synthetic bead demo for joint estimation of scene and wavefront. The full project will be released
 after the paper is accepted.
 
 ## Quick start
