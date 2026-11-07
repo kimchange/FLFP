@@ -340,41 +340,52 @@ def reconstruct(project, observed):
 
 # 4. Save estimates. Optional references are read only after optimization.
 @torch.no_grad()
-def save_results(g, project, estimated_photons, wf):
+def save_results(g, project, estimated_photons, wf, observed, history, seconds):
     OUTPUT.mkdir(parents=True, exist_ok=True)
     volume = estimated_photons/INTENSITY_SCALE
     predicted_photons = project(estimated_photons, wf)
     reprojected = predicted_photons/INTENSITY_SCALE
-    for name, value in [('volume_estimated', volume), ('reprojected_lf', reprojected),
-            ('reprojected_lf_sensor', predicted_photons+BIAS)]:
-        tifffile.imwrite(OUTPUT/f'{name}.tiff', value.cpu().numpy(), compression='zlib')
-    np.savetxt(OUTPUT/'wf_estimated.txt', wf.cpu().numpy())
-    pupil = torch.fft.fftshift(g.kmask2).cpu().numpy()
-
-    def phase(coefficients):
-        return torch.fft.fftshift(g.masked_phase_array(coefficients,
-            normalized=True, piston_tip_tilt=True)).cpu().numpy()
-
-    recovered = phase(wf)
-    maps, summary = {'estimated': recovered}, {}
+    phase = torch.fft.fftshift(g.masked_phase_array(wf,
+        normalized=True, piston_tip_tilt=True))
+    pupil = torch.fft.fftshift(g.kmask2).float()
+    for name, value in [('volume', volume), ('reprojected_lf', reprojected),
+            ('pupil_phase_waves', phase), ('pupil_intensity', pupil)]:
+        tifffile.imwrite(OUTPUT/f'{name}.tiff', value.cpu().numpy(),
+            photometric='minisblack', compression='zlib')
+    residual = 100*(predicted_photons.double()-observed.double()).norm()/observed.double().norm()
+    settings = dict(name='Synthetic beads', input=relative_path(DATA),
+        intensity_scale=INTENSITY_SCALE, volume_shape=VOLUME_SHAPE, psf_size=PSF_SIZE,
+        sample_stride=SAMPLE_STRIDE, physical_views=PHYSICAL_VIEWS, optics=OPTICS,
+        modes=MODES, fixed_modes=FIXED_MODES, bias=BIAS, read_variance=READ_VARIANCE)
+    summary = dict(sample=settings['name'], settings=settings, steps=STEPS, seed=SEED,
+        views_per_step=VIEWS_PER_STEP, depth_chunk=DEPTH_CHUNK, device=wf.device.type,
+        relaxation=RELAXATION, regularization=REGULARIZATION,
+        wavefront_learning_rate=LR_WAVEFRONT, wavefront_limit=WAVEFRONT_LIMIT,
+        blur_sigmas=BLUR_SIGMAS, blur_stage_steps=BLUR_STAGE_STEPS,
+        initial_uniform_fraction=INITIAL_UNIFORM_FRACTION,
+        volume_axes='ZYX', light_field_axes='VYX',
+        voxel_spacing_um=[g.dz*1e6, g.dy*g.xy_downsample*1e6, g.dx*g.xy_downsample*1e6],
+        lf_relative_error_percent=float(residual), elapsed_s=seconds,
+        optical_parameters=dict(wavefront_waves=wf.cpu().tolist(),
+            pupil_intensity_status='fixed uniform', history=history))
     if TRUE_WF is not None:
         truth = torch.as_tensor(np.loadtxt(TRUE_WF), dtype=wf.dtype, device=wf.device)
         if truth.shape != wf.shape:
             raise ValueError('TRUE_WF must contain MODES coefficients, or be set to None.')
-        maps = {'true': phase(truth), 'estimated': recovered, 'error': phase(wf-truth)}
-        summary['phase_rms_error'] = g.calcRMS(wf-truth, normalized=True, piston_tip_tilt=True).item()
+        summary['wavefront_rms_error_waves'] = g.calcRMS(wf-truth,
+            normalized=True, piston_tip_tilt=True).item()
     if CLEAN_LF is not None:
         clean = torch.as_tensor(tifffile.imread(CLEAN_LF), dtype=torch.float64, device=wf.device)
         if clean.shape != reprojected.shape:
             raise ValueError('CLEAN_LF must match the reprojected shape, or be set to None.')
-        summary['lf_relative_l2'] = ((reprojected.double()-clean).norm()/clean.norm()).item()
-    for name, waves in maps.items():
-        tifffile.imwrite(OUTPUT/f'phase_{name}_waves.tiff', waves)
-    # The model uses the phase convention exp(-2*pi*i*wavefront).
-    tifffile.imwrite(OUTPUT/'phase_estimated_rad.tiff', -2*np.pi*recovered)
-    tifffile.imwrite(OUTPUT/'pupil_mask.tiff', pupil.astype(np.uint8))
-
-    return summary
+        summary['clean_lf_relative_error_percent'] = (100*(reprojected.double()-clean).norm()/clean.norm()).item()
+    (OUTPUT/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
+    print(f'LF relative error: {residual:.6f}%')
+    if 'wavefront_rms_error_waves' in summary:
+        print(f"Wavefront RMS error: {summary['wavefront_rms_error_waves']:.8g} waves")
+    if 'clean_lf_relative_error_percent' in summary:
+        print(f"Clean LF relative error: {summary['clean_lf_relative_error_percent']:.6f}%")
+    print(f'Results: {relative_path(OUTPUT)}', flush=True)
 
 
 def main():
@@ -405,22 +416,7 @@ def main():
     solve_s = time.perf_counter()-started
     if not torch.isfinite(volume).all() or not torch.isfinite(wf).all():
         raise FloatingPointError('Reconstruction contains nonfinite values; check the data, learning rates, and model.')
-    summary = save_results(g, project, volume, wf)
-    summary.update(steps=STEPS, setup_s=setup_s, solve_s=solve_s,
-        input=relative_path(DATA), intensity_scale=INTENSITY_SCALE, device=device.type,
-        volume_shape=VOLUME_SHAPE, psf_size=PSF_SIZE, sample_stride=SAMPLE_STRIDE,
-        physical_views=PHYSICAL_VIEWS, optics=OPTICS, modes=MODES, fixed_modes=FIXED_MODES,
-        bias=BIAS, read_variance=READ_VARIANCE, seed=SEED, views_per_step=VIEWS_PER_STEP,
-        depth_chunk=DEPTH_CHUNK, object_update='nonnegative_sensitivity_scaled',
-        relaxation=RELAXATION, wavefront_learning_rate=LR_WAVEFRONT,
-        wavefront_limit=WAVEFRONT_LIMIT, regularization=REGULARIZATION,
-        blur_sigmas=BLUR_SIGMAS, blur_stage_steps=BLUR_STAGE_STEPS,
-        initial_uniform_fraction=INITIAL_UNIFORM_FRACTION, history=history)
-    (OUTPUT/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
-    for key in ['phase_rms_error', 'lf_relative_l2']:
-        if key in summary:
-            print(f'{key}: {summary[key]:.8g}')
-    print(f'Results: {relative_path(OUTPUT)}')
+    save_results(g, project, volume, wf, raw-BIAS, history, setup_s+solve_s)
 
 
 if __name__ == '__main__':

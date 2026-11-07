@@ -1,0 +1,36 @@
+{
+  "name": "NeuN cells (right region)",
+  "optics": {
+    "Nnum": 15,
+    "M": 20.0,
+    "n": 1.406,
+    "NA": 1.05,
+    "MLPitch_um": 56.4,
+    "Fml_um": 536.4,
+    "wavelength_nm": 525.0,
+    "dz_um": 1.0,
+    "frequency_base_size": 375
+  },
+  "context_size": 375,
+  "volume_size": 1875,
+  "psf_size": 225,
+  "depth_count": 101,
+  "fine_pitch_um": 0.188,
+  "core_start": 375,
+  "core_size": 1125,
+  "roi_yx": [
+    75,
+    75
+  ],
+  "lf_error_rows": [
+    0,
+    225
+  ],
+  "display_depth_slice": [
+    0,
+    101
+  ],
+  "shutter_width_um": 16.919999999999998,
+  "shutter_rows": 90,
+  "initial_illumination_width_um": 16.919999999999998
+}

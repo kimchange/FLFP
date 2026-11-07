@@ -1,0 +1,36 @@
+{
+  "name": "Beads",
+  "optics": {
+    "Nnum": 15,
+    "M": 7.85,
+    "n": 1.0,
+    "NA": 0.5,
+    "MLPitch_um": 56.4,
+    "Fml_um": 444.15,
+    "wavelength_nm": 525.0,
+    "dz_um": 5.0,
+    "frequency_base_size": 525
+  },
+  "context_size": 357,
+  "volume_size": 1785,
+  "psf_size": 225,
+  "depth_count": 101,
+  "fine_pitch_um": 0.47898089171974517,
+  "core_start": 330,
+  "core_size": 1125,
+  "roi_yx": [
+    66,
+    66
+  ],
+  "lf_error_rows": [
+    0,
+    225
+  ],
+  "display_depth_slice": [
+    0,
+    101
+  ],
+  "shutter_width_um": 86.21656050955414,
+  "shutter_rows": 180,
+  "initial_illumination_width_um": 60.0
+}

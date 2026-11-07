@@ -12,8 +12,14 @@ Desktop.ini
 data/*
 !data/README.md
 !data/demo/
-data/demo/*
-!data/demo/lf.tiff
+!data/beads/
+!data/neun_cells_left/
+!data/neun_cells_right/
+!data/worm_slice_upper/
+!data/worm_slice_lower/
+data/*/*
+!data/*/lf.tiff
+!data/*/settings.json
 !data/demo/lf_clean.tiff
 !data/demo/wf_true.txt
 !data/demo/noise.json
