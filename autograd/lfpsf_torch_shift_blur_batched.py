@@ -936,11 +936,11 @@ if __name__ == "__main__":
         # os.makedirs("./lfpsf", exist_ok=True)
         # tifffile.imwrite("./lfpsf/lfpsf_z%dn%fNA%f_M%d_OSR%d_fml%.1fum_pitch%.1fum_dz%.1fum.tif"%(lfpsf_shape[2], int(n*1), int(na_detection*1), M, OSR, fml*1e6, MLPitch*1e6, dz*1e6), single_point.reshape(-1, *lfpsf_shape[2:]).cpu().numpy(), imagej=True, metadata={'spacing': (dz*1e6, MLPitch/Nnum/M*1e6, MLPitch/Nnum/M*1e6), 'unit': 'micrometer', 'axes': 'TZYX'}, bigtiff=True, compression=None)
         aa = 0 
-        os.makedirs("../results/lfpsfv4_new/lfpsf_xy%d_z%dn%.3fNA%.2f_M%d_OSR%d_fml%.1fum_pitch%.1fum_dz%.1fum_xydownsample%d_psfbinning%d/"%(lfpsf_shape[-1], lfpsf_shape[-3], n, na_detection, M, OSR, fml*1e6, MLPitch*1e6, dz*1e6, xy_downsample, psf_binning), exist_ok=True)
+        os.makedirs("../results/lfpsf/lfpsf_xy%d_z%dn%.3fNA%.2f_M%d_OSR%d_fml%.1fum_pitch%.1fum_dz%.1fum_xydownsample%d_psfbinning%d/"%(lfpsf_shape[-1], lfpsf_shape[-3], n, na_detection, M, OSR, fml*1e6, MLPitch*1e6, dz*1e6, xy_downsample, psf_binning), exist_ok=True)
         # for uu in range(single_point.shape[0]):
         #     for vv in range(single_point.shape[1]):
         # for uu in [2,7]:
         #     for vv in [2,7]:
         for aa in range(len(input_views)):
-            tifffile.imwrite("../results/lfpsfv4_new/lfpsf_xy%d_z%dn%.3fNA%.2f_M%d_OSR%d_fml%.1fum_pitch%.1fum_dz%.1fum_xydownsample%d_psfbinning%d/aa%d.tif"%(lfpsf_shape[-1], lfpsf_shape[-3], n, na_detection, M, OSR, fml*1e6, MLPitch*1e6, dz*1e6, xy_downsample, psf_binning, input_views[aa]), single_point[aa,:,:,:].cpu().numpy(), imagej=True, metadata={'spacing': (MLPitch/Nnum/M*1e6, MLPitch/Nnum/M*1e6), 'unit': 'micrometer', 'axes': 'ZYX'}, compression=None)
+            tifffile.imwrite("../results/lfpsf/lfpsf_xy%d_z%dn%.3fNA%.2f_M%d_OSR%d_fml%.1fum_pitch%.1fum_dz%.1fum_xydownsample%d_psfbinning%d/aa%d.tif"%(lfpsf_shape[-1], lfpsf_shape[-3], n, na_detection, M, OSR, fml*1e6, MLPitch*1e6, dz*1e6, xy_downsample, psf_binning, input_views[aa]), single_point[aa,:,:,:].cpu().numpy(), imagej=True, metadata={'spacing': (MLPitch/Nnum/M*1e6, MLPitch/Nnum/M*1e6), 'unit': 'micrometer', 'axes': 'ZYX'}, compression=None)
             aa += 1

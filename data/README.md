@@ -10,8 +10,8 @@ will be released after the paper is accepted.
 | `wf_true.txt` | 21 reference wavefront coefficients in waves |
 | `noise.json` | Simulation metadata and intensity scale |
 
-This is Sample 2 (zero-based index 1), with a peak expected signal of 100 photons.
-It corresponds to paper Fig. 3(a-e), case `points_p0100_s01`.
+The demo uses a peak expected signal of 100 photons and follows the configuration
+in paper Fig. 3(a-e).
 The reconstruction grid is `[z, y, x] = [101, 675, 675]`, with voxel spacing
 `[5, 0.47898089, 0.47898089]` micrometers.
 

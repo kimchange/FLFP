@@ -25,7 +25,7 @@ EXAMPLE = ROOT / 'data/demo'
 DATA = EXAMPLE / 'lf.tiff'                  # Keep the sensor bias; do not clip.
 TRUE_WF = EXAMPLE / 'wf_true.txt'           # Optional evaluation reference.
 CLEAN_LF = EXAMPLE / 'lf_clean.tiff'        # Optional evaluation reference.
-OUTPUT = ROOT / 'outputs/demo_wavefront_sample02'
+OUTPUT = ROOT / 'outputs/demo_wavefront'
 DEVICE = 'cuda:0'                          # Use 'cpu' for small debugging cases.
 VOLUME_SHAPE = (101, 675, 675)              # [z, y, x], with z centered at zero.
 PSF_SIZE, SAMPLE_STRIDE, MODES = 225, 5, 21
@@ -415,8 +415,7 @@ def main():
         relaxation=RELAXATION, wavefront_learning_rate=LR_WAVEFRONT,
         wavefront_limit=WAVEFRONT_LIMIT, regularization=REGULARIZATION,
         blur_sigmas=BLUR_SIGMAS, blur_stage_steps=BLUR_STAGE_STEPS,
-        initial_uniform_fraction=INITIAL_UNIFORM_FRACTION, history=history,
-        paper_case='points_p0100_s01', paper_revision='figure4_ten_pupils_20261106')
+        initial_uniform_fraction=INITIAL_UNIFORM_FRACTION, history=history)
     (OUTPUT/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
     for key in ['phase_rms_error', 'lf_relative_l2']:
         if key in summary:
