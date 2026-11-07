@@ -1,107 +1,69 @@
-"""Shift--blur variant with batched initialization of the angle-kernel bank.
-
-Copied from the supplied reference; only the constructor's angle-kernel
-assembly and its optional batch-size argument differ. All propagation,
-shift estimation, cropping, normalization and generation methods are retained.
-
-The reconstruction copy also accepts out_size in the PSF methods so that
-the existing 225/375/525-pixel reconstruction experiments keep their support.
-"""
+"""Differentiable light-field PSFs with batched angle-kernel initialization."""
 
 import numpy as np
 import torch
-import tifffile
-# dtype = torch.cuda.FloatTensor
 
-from typing import Dict, Optional, Sequence, Tuple, Union
-import torch
+from typing import Union
 import math
 
 def osa_to_nm(j):
-    """根据 OSA/ANSI 索引 j 反推径向阶数 n 和角向频率 m"""
+    """Convert an OSA/ANSI index to radial order n and azimuthal order m."""
     n = int((math.sqrt(8 * j + 1) - 1) / 2)
     m = 2 * j - n * (n + 2)
     return n, m
 
 def generate_analytical_derivative_matrices(C=21, device='cpu'):
-    """
-    纯解析生成 Zernike 导数转换矩阵 Dx 和 Dy。
-    绝对零误差，O(C^2) 极速生成。
-    """
+    """Build analytical Zernike derivative matrices Dx and Dy."""
     Dx = torch.zeros((C, C), dtype=torch.float32, device=device)
     Dy = torch.zeros((C, C), dtype=torch.float32, device=device)
-    
+
     for j in range(C):
         n, m = osa_to_nm(j)
-        
+
         for k in range(C):
             np, mp = osa_to_nm(k)
-            
-            # 【规则 1】径向定律：n' 必须小于 n，且差值为奇数
+
             if np >= n or (n - np) % 2 == 0:
                 continue
-                
-            # 【规则 2】角向定律：频率必定偏移 1
+
             if abs(mp) != abs(m) + 1 and abs(mp) != abs(m) - 1:
                 continue
-                
-            # 【规则 3】基础耦合系数
+
             c = math.sqrt((n + 1) * (np + 1))
             if m == 0 or mp == 0:
                 c *= math.sqrt(2)
-                
-            # ==========================================
-            # 填入 X 偏导数矩阵 Dx (保对称性: cos->cos, sin->sin)
-            # ==========================================
+
             if (m >= 0 and mp >= 0) or (m < 0 and mp < 0):
-                Dx[k, j] = c  # Dx 的系数永远为正！
-                
-            # ==========================================
-            # 填入 Y 偏导数矩阵 Dy (反转对称性: cos->sin, sin->cos)
-            # ==========================================
-            if m >= 0 and mp < 0:      # Cos 映射到 Sin
+                Dx[k, j] = c
+
+            if m >= 0 and mp < 0:
                 if abs(mp) == abs(m) + 1:
                     Dy[k, j] = c
                 elif abs(mp) == abs(m) - 1:
                     Dy[k, j] = -c
-                    
-            elif m < 0 and mp >= 0:    # Sin 映射到 Cos
+
+            elif m < 0 and mp >= 0:
                 if abs(mp) == abs(m) + 1:
                     Dy[k, j] = -c
                 elif abs(mp) == abs(m) - 1:
                     Dy[k, j] = c
-                    
+
     return Dx, Dy
 
-# ================= 极速调用 =================
-# 在引擎初始化时调用一次：
-# Dx, Dy = generate_analytical_derivative_matrices(C=21, device='cpu')
-
-# 在实际的仿真管线中：
-# coeffs_phi 是你当前波前的 Zernike 系数 [Batch, 21]
-# 直接通过矩阵乘法，获得完美解析梯度的 Zernike 系数！
-# coeffs_grad_x = coeffs_phi @ Dx
-# coeffs_grad_y = coeffs_phi @ Dy
-
-
-
-
 class PsfGenerator5D:
-    
+
     def __init__(self, lfpsf_shape=(13,13,1,351,351), MLPitch=100e-6, dz=0.2e-6, xy_downsample = 1, M = 63, lam_detection=525e-9, n=1.515, na_detection=1.4, fml=2100e-6, Nnum = 13, OSR=3, n_threads=4, device='cuda:0', zernike_coef_in_lambda=True, input_views=None, circle_aperture=True, precompute_view_batch_size=3):
-        
-        lfpsf_shape = tuple(lfpsf_shape) 
+
+        lfpsf_shape = tuple(lfpsf_shape)
         psf_shape = (lfpsf_shape[-3], lfpsf_shape[-2]*OSR, lfpsf_shape[-1]*OSR)
         self.real_dtype = torch.float32
-
-
 
         self.Nz, self.Ny, self.Nx = psf_shape
         self.dz, self.dy, self.dx = dz, MLPitch / Nnum / M /OSR, MLPitch / Nnum / M /OSR
         self.fml = fml
         self.circle_aperture = circle_aperture
         self.complex_dtype = torch.complex64
-        
+
         self.na_detection = na_detection
         self.lam_detection = lam_detection
         self.device = torch.device(device)
@@ -120,43 +82,7 @@ class PsfGenerator5D:
                     dtype=self.real_dtype,
                 )
         self.hw_index = torch.fft.ifftshift(torch.arange(self.Nx//self.xy_downsample, device=self.device) - self.Nx//self.xy_downsample // 2)
-        
-        # kx = torch.fft.fftfreq(self.Nx, self.dx, device=self.device, dtype=dtype)[self.hw_index]
-        # ky = torch.fft.fftfreq(self.Ny, self.dy, device=self.device, dtype=dtype)[self.hw_index]
 
-        # z = self.dz * (torch.arange(self.Nz, device=self.device, dtype=self.real_dtype) - self.Nz // 2)
-
-
-        # KZ3, KY3, KX3 = torch.meshgrid(z, ky, kx, indexing="ij")
-        # KR3 = torch.sqrt(KX3 ** 2 + KY3 ** 2)
-
-        # # the cutoff in fourier domain (coherent cutoff)
-        # self.kcut = 1. * na_detection / self.lam_detection
-        
-        # kmask3 = (KR3 <= self.kcut).type(dtype).to(device)# [:, self.hw_index, :][:, :, self.hw_index]
-
-        # H = torch.sqrt(1. * self.n ** 2 - KR3 ** 2 * lam_detection ** 2).type(dtype).to(device)
-
-
-        # out_ind = torch.isnan(H)
-        
-        # # self.kprop = torch.exp(-2.j * torch.pi / lam_detection * self.KZ3  * H) # why -2.j not 2.j
-        # kprop = torch.exp(2.j * torch.pi / lam_detection * KZ3  * H) # why -2.j not 2.j
-        # kprop[out_ind] = 0.
-
-        # self.kbase = kmask3 * kprop# [:, self.hw_index, :][:, :, self.hw_index]
-        # # self.kbase = self.fresnel2d(self.kbase, self.pixelPitch / OSR, -fml, self.k, device=device)
-        # self.energy_ratio_complex = ( torch.sum(kmask3) / torch.numel(kmask3) ) ** 0.5
-
-        # KY2, KX2 = torch.meshgrid(ky, kx, indexing="ij")
-        # KR2 = torch.hypot(KX2, KY2)
-
-        # self.krho = KR2 / self.kcut
-        # self.kphi = torch.arctan2(KY2, KX2)
-        # self.kmask2 = (KR2 <= self.kcut)
-
-        # A single 2-D objective-frequency grid is broadcast over depth. This
-        # replaces the original KZ3/KY3/KX3 tensors.
         kx = torch.fft.fftfreq(
             self.Nx, d=self.dx, device=self.device, dtype=self.real_dtype
         )[self.hw_index]
@@ -202,14 +128,11 @@ class PsfGenerator5D:
         )
         self.zernike_coef_in_lambda = zernike_coef_in_lambda
 
-        self.phase_angular_spectrum = -self._H / self.rms_H 
+        self.phase_angular_spectrum = -self._H / self.rms_H
         self.phase_angular_spectrum[self.kmask2==False] = 0
 
-        self.dz_rms = dz * self.rms_H / lam_detection # to make one pixel shift in depth 
+        self.dz_rms = dz * self.rms_H / lam_detection
 
-        
-        # Image-plane coordinates used for the periodic modulation and sensor
-        # propagation, matching the original implementation.
         modulation_dx = self.pixelPitch / self.OSR
         x1space = modulation_dx * (
             torch.arange(self.Ny, device=self.device, dtype=self.real_dtype)
@@ -237,7 +160,6 @@ class PsfGenerator5D:
             )
         )
 
-
         self.MLARRAY = self.calcML(
             self.fml,
             self.k,
@@ -260,31 +182,14 @@ class PsfGenerator5D:
             value, dim=(-2, -1)
         )
 
-        # x1space = self.pixelPitch / OSR * (torch.arange(self.Ny) - self.Ny // 2)
-        # x2space = self.pixelPitch / OSR * (torch.arange(self.Nx) - self.Nx // 2)
-        # x1MLspace = self.pixelPitch / OSR * (torch.arange(-(Nnum*OSR // 2), Nnum*OSR // 2 + 1))
-        # x2MLspace = self.pixelPitch / OSR * (torch.arange(-(Nnum*OSR // 2), Nnum*OSR // 2 + 1))
-
-        # self.MLARRAY = self.calcML(fml, 2.0 * torch.pi / lam_detection,
-        #                           x1MLspace, x2MLspace, x1space, x2space, 
-        #                           circle_aperture=True).to(device)
-
-        # self.fresnel_2dkernel = self.get_fresnel2dkernel(self.Nx, self.Ny, self.pixelPitch / OSR, fml, self.k, device=device)
-
-
-        # uv_mla = torch.roll(self.MLARRAY, shifts=(int((u-Nnum//2)*self.OSR), int((v-Nnum//2)*self.OSR)), dims=(0,1))  # shift in spatial domain <=> phase ramp in Fourier domain
-        # uv_mla_fresnel = torch.fft.fft2( torch.fft.ifftshift( uv_mla * self.fresnel_2dkernel ) )
         if input_views is not None:
             u,v = np.unravel_index(input_views, shape=(Nnum,Nnum))
         else:
             u,v = np.unravel_index(np.arange(0,Nnum*Nnum), shape=(Nnum,Nnum))
-        # u,v = np.unravel_index(np.arange(0,Nnum*Nnum)[32:33], shape=(Nnum,Nnum))
-        # f = lambda x:[x] if type(x) ==int else x
-        # u, v = f(u), f(v)
-        self.aperture_shift =  MLPitch / Nnum / lam_detection / fml / (1/self.Nx*xy_downsample/ MLPitch * Nnum)  # subaperture 
-        # Prepare the same angle kernels in fixed-size batches. The reference
-        # repeatedly concatenates an ever-growing full-grid tensor. Allocate
-        # only the final cropped kernel bank and write each independent batch.
+
+        self.aperture_shift =  MLPitch / Nnum / lam_detection / fml / (1/self.Nx*xy_downsample/ MLPitch * Nnum)
+
+        # Precompute view kernels in small batches to limit peak memory.
         if precompute_view_batch_size < 1:
             raise ValueError("precompute_view_batch_size must be positive")
         self.precompute_view_batch_size = precompute_view_batch_size
@@ -311,116 +216,102 @@ class PsfGenerator5D:
                 * self.kmask2, dim=(-2, -1)
             )
 
-
         self.myzifftn = lambda x: torch.fft.ifftn(x, dim=(-2,-1))
 
-
-
-    
     def zernike_polynomial(self, idx, normalized = True):
-        
+
         R = self.krho
         THETA = self.kphi
-        
-        # see https://en.wikipedia.org/wiki/Zernike_polynomials
-        # https://wp.optics.arizona.edu/jsasian/wp-content/uploads/sites/33/2016/03/ZP-Lecture-12.pdf
-        
-        # n = 0
+
         if idx == 0:
-            # F = torch.ones_like(R)
-            F = self.phase_angular_spectrum # hacked, now it represents the phase angular spectrum, very similar to defocus but not the same especially when large NA
-            
-        # n = 1
+
+            F = self.phase_angular_spectrum  # Mode 0 represents axial propagation.
+
         elif idx == 1:
-            # Tip
+
             norm_factor = 2. if normalized else 1.
             F = norm_factor * torch.mul(R, torch.sin(THETA))
         elif idx == 2:
-            # Tilt
+
             norm_factor = 2. if normalized else 1.
             F = norm_factor * torch.mul(R, torch.cos(THETA))
-            
-        # n = 2
+
         elif idx == 3:
-            # Oblique astigmatism
+
             norm_factor = 6**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**2, torch.sin(2.*THETA))
         elif idx == 4:
-            # Defocus
+
             norm_factor = 3**0.5 if normalized else 1.
             F = norm_factor * (2.*R**2 - 1)
         elif idx == 5:
-            # Vertical astigmatism
+
             norm_factor = 6**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**2, torch.cos(2.*THETA))
-            
-        # n = 3
+
         elif idx == 6:
-            # Vertical trefoil 
+
             norm_factor = 8**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**3, torch.sin(3.*THETA))
         elif idx == 7:
-            # Vertical coma
+
             norm_factor = 8**0.5 if normalized else 1.
             F = norm_factor * torch.mul(3.*R**3 - 2.*R, torch.sin(THETA))
         elif idx == 8:
-            # Horizontal coma 
+
             norm_factor = 8**0.5 if normalized else 1.
             F = norm_factor * torch.mul(3.*R**3 - 2.*R, torch.cos(THETA))
         elif idx == 9:
-            # Oblique trefoil 
+
             norm_factor = 8**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**3, torch.cos(3.*THETA))
-            
-        # n = 4
+
         elif idx == 10:
-            # Oblique quadrafoil 
+
             norm_factor = 10**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**4, torch.sin(4.*THETA))
         elif idx == 11:
-            # Oblique secondary astigmatism 
+
             norm_factor = 10**0.5 if normalized else 1.
             F = norm_factor * torch.mul(4.*R**4-3.*R**2, torch.sin(2.*THETA))
         elif idx == 12:
-            # Primary spherical
+
             norm_factor = 5**0.5 if normalized else 1.
             F = norm_factor * (6.*R**4-6.*R**2 + torch.ones_like(R))
         elif idx == 13:
-            # Vertical secondary astigmatism 
+
             norm_factor = 10**0.5 if normalized else 1.
             F = norm_factor * torch.mul(4.*R**4-3.*R**2, torch.cos(2.*THETA))
         elif idx == 14:
-            # Vertical quadrafoil 
+
             norm_factor = 10**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**4, torch.cos(4.*THETA))
-            
-        # n = 5
+
         elif idx == 15:
-            # Vertical pentafoil
+
             norm_factor = 12**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**5, torch.sin(5.*THETA))
         elif idx == 16:
-            # Vertical secondary trefoil
+
             norm_factor = 12**0.5 if normalized else 1.
             F = norm_factor * torch.mul(5.*R**5 - 4.*R**3, torch.sin(3.*THETA))
         elif idx == 17:
-            # Vertical secondary coma
+
             norm_factor = 12**0.5 if normalized else 1.
             F = norm_factor * torch.mul(10.*R**5 - 12.*R**3 + 3.*R, torch.sin(THETA))
         elif idx == 18:
-            # Horizontal secondary coma
+
             norm_factor = 12**0.5 if normalized else 1.
             F = norm_factor * torch.mul(10.*R**5 - 12.*R**3 + 3.*R, torch.cos(THETA))
         elif idx == 19:
-            # Oblique secondary trefoil
+
             norm_factor = 12**0.5 if normalized else 1.
             F = norm_factor * torch.mul(5.*R**5 - 4.*R**3, torch.cos(3.*THETA))
         elif idx == 20:
-            # Oblique pentafoil
+
             norm_factor = 12**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**5, torch.cos(5.*THETA))
-            
-        # n = 6
+
         elif idx == 21:
             norm_factor = 14**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**6, torch.sin(6.*THETA))
@@ -442,8 +333,7 @@ class PsfGenerator5D:
         elif idx == 27:
             norm_factor = 14**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**6, torch.cos(6.*THETA))
-        
-        # n = 7
+
         elif idx == 28:
             norm_factor = 16**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**7, torch.sin(7.*THETA))
@@ -468,8 +358,7 @@ class PsfGenerator5D:
         elif idx == 35:
             norm_factor = 16**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**7, torch.cos(7.*THETA))
-            
-        # n = 8
+
         elif idx == 36:
             norm_factor = 18**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**8, torch.sin(8.*THETA))
@@ -493,12 +382,11 @@ class PsfGenerator5D:
             F = norm_factor * torch.mul(28.*R**8 - 42.*R**6 + 15.*R**4, torch.cos(4.*THETA))
         elif idx == 43:
             norm_factor = 18**0.5 if normalized else 1.
-            F = norm_factor * torch.mul(8.*R**8 - 7.*R**6, torch.cos(6.*THETA))  
+            F = norm_factor * torch.mul(8.*R**8 - 7.*R**6, torch.cos(6.*THETA))
         elif idx == 44:
             norm_factor = 18**0.5 if normalized else 1.
-            F = norm_factor * torch.mul(R**8, torch.cos(8.*THETA))     
-            
-        # n = 9
+            F = norm_factor * torch.mul(R**8, torch.cos(8.*THETA))
+
         elif idx == 45:
             norm_factor = 20**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**9, torch.sin(9.*THETA))
@@ -529,45 +417,40 @@ class PsfGenerator5D:
         elif idx == 54:
             norm_factor = 20**0.5 if normalized else 1.
             F = norm_factor * torch.mul(R**9, torch.cos(9.*THETA))
-            
+
         else:
             raise
-        
+
         return F
 
-    
     def masked_phase_array(self, phi, normalized=False, piston_tip_tilt=False):
-        
+
         _phase = torch.zeros_like(self.krho)
         for j in range(len(phi)):
             if not piston_tip_tilt:
-                _phase += phi[j] * self.zernike_polynomial(j+3, normalized)#.type(torch.float32).to(self.device) # 3 - 14
+                _phase += phi[j] * self.zernike_polynomial(j+3, normalized)
             else:
-                _phase += phi[j] * self.zernike_polynomial(j, normalized)#.type(torch.float32).to(self.device) # 0 - 14
-        
+                _phase += phi[j] * self.zernike_polynomial(j, normalized)
+
         return self.kmask2 * _phase
 
-    
     def coherent_psf_v3(self, u, v, d, phi, normalized=False, piston_tip_tilt=False):
         Nnum = self.Nnum
 
-        # uv_mla = torch.roll(self.MLARRAY, shifts=(int((u-Nnum//2)*self.OSR), int((v-Nnum//2)*self.OSR)), dims=(0,1))  # shift in spatial domain <=> phase ramp in Fourier domain
-        # uv_mla_fresnel = torch.fft.fft2( torch.fft.ifftshift( uv_mla * self.fresnel_2dkernel ) )
         f = lambda x:[x] if type(x) ==int else x
         u, v = f(u), f(v)
-        uv_fresnel = torch.roll(self.fresnel_2dkernel, shifts=(-int((u[0]-Nnum//2)*self.OSR), -int((v[0]-Nnum//2)*self.OSR)), dims=(-2,-1)).unsqueeze(0)  # shift in spatial domain <=> phase ramp in Fourier domain
+        uv_fresnel = torch.roll(self.fresnel_2dkernel, shifts=(-int((u[0]-Nnum//2)*self.OSR), -int((v[0]-Nnum//2)*self.OSR)), dims=(-2,-1)).unsqueeze(0)
         for ii in range(1, len(u)):
             uv_fresnel = torch.cat((uv_fresnel, torch.roll(self.fresnel_2dkernel, shifts=(-int((u[ii]-Nnum//2)*self.OSR), -int((v[ii]-Nnum//2)*self.OSR)), dims=(-2,-1)).unsqueeze(0)))
         uv_mla_fresnel = uv_fresnel * self.MLARRAY.unsqueeze(0)
-        # uv_mla_fresnel = uv_mla_fresnel[:, self.xy_downsample//2::self.xy_downsample, self.xy_downsample//2::self.xy_downsample]
-        uv_mla_fresnel = torch.fft.fft2( torch.fft.ifftshift( uv_mla_fresnel , dim=(-2,-1) ), dim=(-2,-1) )
 
+        uv_mla_fresnel = torch.fft.fft2( torch.fft.ifftshift( uv_mla_fresnel , dim=(-2,-1) ), dim=(-2,-1) )
 
         h_slice = slice((self.Ny - self.Ny//self.xy_downsample) //2, (self.Ny//self.xy_downsample + self.Ny)//2, None)
         w_slice = slice((self.Nx - self.Nx//self.xy_downsample) //2, (self.Nx//self.xy_downsample + self.Nx)//2, None)
         hw_index = torch.fft.ifftshift(torch.arange(self.Nx//self.xy_downsample, device=self.device) - self.Nx//self.xy_downsample // 2)
-        uv_mla_fresnel = torch.fft.ifftshift(torch.fft.fftshift( uv_mla_fresnel , dim=(-2,-1) )[:, h_slice, w_slice], dim=(-2,-1) ) 
-        
+        uv_mla_fresnel = torch.fft.ifftshift(torch.fft.fftshift( uv_mla_fresnel , dim=(-2,-1) )[:, h_slice, w_slice], dim=(-2,-1) )
+
         if phi is None:
             ku = self.kbase[d, :, :].unsqueeze(0) * uv_mla_fresnel.unsqueeze(1)
         else:
@@ -576,20 +459,18 @@ class PsfGenerator5D:
                 ku = self.kbase[d, :, :].unsqueeze(0) * torch.exp( -2.j * torch.pi * phi ).unsqueeze(0).unsqueeze(0) * uv_mla_fresnel.unsqueeze(1)
             else:
                 ku = self.kbase[d, :, :].unsqueeze(0) * torch.exp(-2.j * torch.pi * phi / self.lam_detection).unsqueeze(0).unsqueeze(0) * uv_mla_fresnel.unsqueeze(1)
-            # ku = self.kbase.unsqueeze(0) * torch.exp(1j * phi ).unsqueeze(0).unsqueeze(0) * uv_mla_fresnel.unsqueeze(1)
+
         res = self.myzifftn(ku) / self.energy_ratio_complex
         res = torch.fft.fftshift(res, dim=(-2,-1))
-        return res[:, :, self.OSR//2::self.OSR, self.OSR//2::self.OSR] * self.OSR  # downsample to original size  
+        return res[:, :, self.OSR//2::self.OSR, self.OSR//2::self.OSR] * self.OSR
 
     def coherent_psf(self, a, d, phi, normalized=False, piston_tip_tilt=False, psf_binning=3, out_size=(225, 225)):
 
         uv_mla_fresnel = self.uv_mla_fresnel[a,:,:]
-        
-        
-        
+
         if phi is None:
             shift_int, uv_mla_fresnel_phi = self.decouple_shift_unwrapped_slicing(uv_mla_fresnel.unsqueeze(1)  , torch.fft.fftshift( -2*torch.pi * (self.phase_angular_spectrum.unsqueeze(0).unsqueeze(0) * d.reshape(1,-1,1,1) * self.dz_rms) ,dim=(-2,-1)) , psf_binning=psf_binning)
-            # ku =  torch.fft.fftshift( self.kbase.unsqueeze(0), dim=(-2,-1)) * uv_mla_fresnel_phi
+
         else:
             phi = self.masked_phase_array(phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt)
             shift_int, uv_mla_fresnel_phi = self.decouple_shift_unwrapped_slicing(uv_mla_fresnel.unsqueeze(1)  , torch.fft.fftshift( -2*torch.pi * (self.phase_angular_spectrum.unsqueeze(0).unsqueeze(0) * d.reshape(1,-1,1,1) * self.dz_rms + phi.unsqueeze(0).unsqueeze(0) ) ,dim=(-2,-1)) , psf_binning=psf_binning)
@@ -597,15 +478,13 @@ class PsfGenerator5D:
         ku = torch.fft.fftshift( self.kbase.unsqueeze(0), dim=(-2,-1)) * uv_mla_fresnel_phi
 
         res = compute_centered_psf_mft_downsampled(ku, out_size=out_size, down_factor=psf_binning) * (psf_binning / self.energy_ratio_complex)
-        # res = torch.fft.fftshift(res, dim=(-2,-1))
-        # return res
-        return shift_int // psf_binning, res  # downsample to original size
+
+        return shift_int // psf_binning, res
 
     def coherent_psf_shifted(self, a, d, phi, normalized=False, piston_tip_tilt=False, psf_binning=3, shift_fixed=None, out_size=(225, 225)):
-        # shift_fixed is after binning
 
         uv_mla_fresnel = self.uv_mla_fresnel[a,:,:]
-        
+
         if phi is None:
             uv_mla_fresnel_phi = self.apply_known_int_shift(uv_mla_fresnel.unsqueeze(1)  , torch.fft.fftshift( -2*torch.pi * (self.phase_angular_spectrum.unsqueeze(0).unsqueeze(0) * d.reshape(1,-1,1,1) * self.dz_rms) ,dim=(-2,-1)) , psf_binning=psf_binning, shift_int = shift_fixed)
         else:
@@ -615,13 +494,12 @@ class PsfGenerator5D:
         ku = torch.fft.fftshift( self.kbase.unsqueeze(0), dim=(-2,-1)) * uv_mla_fresnel_phi
         res = compute_centered_psf_mft_downsampled(ku, out_size=out_size, down_factor=psf_binning) * (psf_binning / self.energy_ratio_complex)
 
-        return res  # downsample to original size
-
+        return res
 
     def calcRMS(self, phi, normalized=False, piston_tip_tilt=False):
         phase = self.masked_phase_array(phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt)
         phase = phase[self.kmask2]
-        # rms = torch.std(phase)
+
         rms = ( ((phase - phase.mean())**2 ).sum() / phase.numel() )** 0.5
         return rms
 
@@ -633,9 +511,8 @@ class PsfGenerator5D:
         else:
             shift_int, _psf = self.coherent_psf(a, d, phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt, psf_binning=psf_binning, out_size=out_size)
             _psf = torch.abs(_psf) ** 2
-            # _psf /= torch.sum(_psf, dim = (1, 2), keepdim = True)
-            return shift_int, _psf
 
+            return shift_int, _psf
 
     @staticmethod
     def calcML(
@@ -731,18 +608,15 @@ class PsfGenerator5D:
     @staticmethod
     def fresnel2d(x, dx0, z, k, device='cpu'):
 
-        # 使用torch.fft.fftfreq生成u和v
         u = torch.fft.fftfreq(x.shape[-1], d=dx0).to(device)
         v = torch.fft.fftfreq(x.shape[-2], d=dx0).to(device)
 
-        # 生成网格
         V, U = torch.meshgrid(v, u, indexing='ij')
 
         H = x * torch.exp(1j * k * z) * torch.exp(-1j * 2 * torch.pi**2 * (U**2 + V**2).unsqueeze(0)  * z / k)
-        # h = torch.fft.fftshift(torch.fft.ifft2(H))
 
         return H
-    
+
     def get_depth_shift(self, u, v, d, phi=None, normalized=True, piston_tip_tilt=False):
         psf_d = self.incoherent_psf(u,v, slice(d,d+1,None), phi=phi, normalized=normalized, piston_tip_tilt=piston_tip_tilt)
         shift = self.get_centerofmass(psf_d)
@@ -754,80 +628,63 @@ class PsfGenerator5D:
         input: [C,D,H,W]
         return:[C,D,2]
         """
-        C, D, H, W = psf.shape# [-2], psf.shape[-1]
+        C, D, H, W = psf.shape
         device = psf.device
-        # psf = psf.view(-1, H, W).unsqueeze(-1)
+
         psf = psf.reshape(C, D, H, W, 1)
-        hwgrid = torch.stack(torch.meshgrid(torch.arange(H, device=device) - (H-1)/2,torch.arange(W, device=device) - (W-1)/2,indexing='ij'), dim=-1).unsqueeze(0) # 1, H, W, 2
+        hwgrid = torch.stack(torch.meshgrid(torch.arange(H, device=device) - (H-1)/2,torch.arange(W, device=device) - (W-1)/2,indexing='ij'), dim=-1).unsqueeze(0)
         psf_centerofmass = torch.zeros(C, D, 2, device=device)
         for c in range(C):
             psf_centerofmass[c, :,:] = (  psf[c, :,:,:,:] * hwgrid / (psf[c, :,:,:,:].sum((-3,-2),keepdim =True) + 1e-9)  ).sum((-3,-2))
 
-        # return (psf*hwgrid/(psf.sum((-3,-2),keepdim =True) + 1e-9)).sum((-3,-2)).view(C, D, 2)
         return psf_centerofmass
-
-
-
 
     @staticmethod
     def decouple_shift_unwrapped_slicing(U, Phi, is_ifft=True, psf_binning=3):
         """
-        无包裹边界免疫解耦引擎 (Unwrapped Boundary-Immune Engine)
-        结合了复共轭切片的稳定性与连续相位的无包裹特性，通过几何平均权重彻底抹杀边界断崖。
+        Separate integer shifts from the local blur using adjacent phase differences.
+        Amplitude-product weights suppress contributions across the pupil boundary.
         """
         A, _, H_dim, W_dim = U.shape
         _, C, _, _ = Phi.shape
         device = U.device
-        
-        # =======================================================
-        # 1. X 方向处理
-        # =======================================================
+
         U_x_fwd = U[..., :, 1:]
         U_x_bwd = U[..., :, :-1]
         Phi_x_fwd = Phi[..., :, 1:]
         Phi_x_bwd = Phi[..., :, :-1]
-        
-        # 提取相位差
+
         dphi_U_x = torch.angle(U_x_fwd * U_x_bwd.conj())
         dphi_Phi_x = Phi_x_fwd - Phi_x_bwd
-        
-        # 【神来之笔：几何平均权重】
-        # 完美等效于复共轭相乘的掩码特性，只要有一侧是 0，直接斩断虚假梯度！
+
         I_x = U_x_fwd.abs() * U_x_bwd.abs()
-        
+
         sum_X = (I_x * (dphi_U_x + dphi_Phi_x)).sum(dim=(-2, -1), keepdim=True)
         denom_X = I_x.sum(dim=(-2, -1), keepdim=True) + 1e-12
 
-        # =======================================================
-        # 2. Y 方向处理
-        # =======================================================
         U_y_fwd = U[..., 1:, :]
         U_y_bwd = U[..., :-1, :]
         Phi_y_fwd = Phi[..., 1:, :]
         Phi_y_bwd = Phi[..., :-1, :]
-        
+
         dphi_U_y = torch.angle(U_y_fwd * U_y_bwd.conj())
         dphi_Phi_y = Phi_y_fwd - Phi_y_bwd
-        
-        # 几何平均权重
+
         I_y = U_y_fwd.abs() * U_y_bwd.abs()
-        
+
         sum_Y = (I_y * (dphi_U_y + dphi_Phi_y)).sum(dim=(-2, -1), keepdim=True)
         denom_Y = I_y.sum(dim=(-2, -1), keepdim=True) + 1e-12
 
-        # =======================================================
-        # 3. 物理映射与整数补偿
-        # =======================================================
         fft_sign = -1.0 if is_ifft else 1.0
-        
+
         shift_x_sub = fft_sign * (sum_X / denom_X) * W_dim / (2 * torch.pi)
         shift_y_sub = fft_sign * (sum_Y / denom_Y) * H_dim / (2 * torch.pi)
-        
+
         shift_x_int = torch.round(shift_x_sub) // psf_binning * psf_binning
         shift_y_int = torch.round(shift_y_sub) // psf_binning * psf_binning
-        
+
         int_shift = torch.cat(
-            [shift_y_int.view(A, C, 1), shift_x_int.view(A, C, 1)], 
+            [shift_y_int.view(A, C, 1), shift_x_int.view(A, C, 1)],
             dim=-1
         ).to(torch.long)
 
@@ -835,17 +692,17 @@ class PsfGenerator5D:
         center_x = W_dim // 2
         freq_y = (torch.arange(H_dim, dtype=torch.float32, device=device) - center_y) / H_dim
         freq_x = (torch.arange(W_dim, dtype=torch.float32, device=device) - center_x) / W_dim
-        
+
         Y, X = torch.meshgrid(freq_y, freq_x, indexing='ij')
         Y = Y.view(1, 1, H_dim, W_dim)
         X = X.view(1, 1, H_dim, W_dim)
-        
+
         phase_ramp = torch.exp(
             -1j * fft_sign * 2 * torch.pi * (X * shift_x_int + Y * shift_y_int)
         )
-        
+
         blur_freq = U * torch.exp(1j * Phi) * phase_ramp
-        
+
         return int_shift, blur_freq
 
     @staticmethod
@@ -857,14 +714,14 @@ class PsfGenerator5D:
         psf_binning=3,
     ):
         """
-        使用已知整数位移生成去除宏观平移后的 blur_freq。
+        Remove a known integer shift from the frequency-domain field.
 
         Args:
-            U: [A, 1, H, W]，复数频域振幅
-            Phi: [1, C, H, W]，相位
-            shift_int: [A, C, 2]，顺序为 (y, x)，单位为降采样后的 PSF 像素
-            is_ifft: 是否采用 IFFT 符号约定
-            psf_binning: PSF 降采样倍率
+            U: Complex frequency-domain amplitude, [A, 1, H, W].
+            Phi: Phase in radians, [1, C, H, W].
+            shift_int: [A, C, 2] in (y, x) order, measured in binned PSF pixels.
+            is_ifft: Use the inverse Fourier transform sign convention.
+            psf_binning: PSF downsampling factor.
 
         Returns:
             blur_freq: [A, C, H, W]
@@ -873,7 +730,7 @@ class PsfGenerator5D:
         device = U.device
         real_dtype = U.real.dtype
 
-        # 恢复到 decouple_shift_unwrapped_slicing 内部使用的高分辨率位移单位。
+        # Convert binned PSF shifts to the full-resolution grid.
         shift = shift_int.detach().to(device=device, dtype=real_dtype)
         shift_y = shift[..., 0, None, None] * psf_binning
         shift_x = shift[..., 1, None, None] * psf_binning
@@ -890,78 +747,52 @@ class PsfGenerator5D:
 
         return U * torch.exp(1j * Phi) * phase_ramp
 
-
 def compute_centered_psf_mft_downsampled(blur_freq, out_size=(3, 3), down_factor=5, is_ifft=True):
     """
-    带降采样的高效局部矩阵傅里叶变换 (MFT)。
-    直接在目标降采样网格上求解，彻底规避全尺寸 IFFT 的冗余计算。
-    
-    输入:
-        blur_freq: [A, C, H, W] 扣除平移后的频域模糊场 (原图巨大分辨率)
-        out_size: (out_H, out_W) 你想要的【最终降采样后】的输出张量大小
-        down_factor: 降采样倍率 (等价于空间域卷积的 stride)
-    输出:
-        psf_roi_complex: [A, C, out_H, out_W] 的局部低分辨率光场
+    Evaluate a local matrix Fourier transform directly on the sampled output grid.
+
+    Args:
+        blur_freq: Frequency-domain field with its shift removed, [A, C, H, W].
+        out_size: Output dimensions (out_H, out_W) after downsampling.
+        down_factor: Spatial sampling stride.
+
+    Returns:
+        Complex local field with shape [A, C, out_H, out_W].
     """
     A, C, H, W = blur_freq.shape
     out_H, out_W = out_size
     device = blur_freq.device
-    
+
     sign = 1.0 if is_ifft else -1.0
-    
-    # =======================================================
-    # 1. 严格对齐频域坐标系
-    # 将输入频域的零频移到矩阵物理中心，匹配 [-H/2, H/2-1] 坐标系
-    # =======================================================
-    # blur_freq = torch.fft.fftshift(blur_freq, dim=(-2, -1))
-    
+
+    # The input field is centered in frequency; output coordinates use the stride.
     u = torch.arange(H, dtype=torch.float32, device=device) - H // 2
     v = torch.arange(W, dtype=torch.float32, device=device) - W // 2
-    
-    # =======================================================
-    # 2. 核心魔法：物理空间跨步展开 (Dilated Spatial Grid)
-    # 通过直接给坐标乘上 down_factor，我们让 MFT "隔空取物"。
-    # 算出来的直接就是跨步采样后的结果！
-    # =======================================================
-    # 例如 out_H=3, down_factor=5 -> y 坐标在原图上变成了 [-5, 0, 5]
+
     y = (torch.arange(out_H, dtype=torch.float32, device=device) - out_H // 2) * down_factor
     x = (torch.arange(out_W, dtype=torch.float32, device=device) - out_W // 2) * down_factor
-    
-    # =======================================================
-    # 3. 构建投影矩阵 (MFT Kernels)
-    # =======================================================
+
     phase_y = 2 * torch.pi * torch.outer(y, u) / H
     phase_x = 2 * torch.pi * torch.outer(x, v) / W
-    
-    K_y = torch.exp(1j * sign * phase_y) # Shape: [out_H, H]
-    K_x = torch.exp(1j * sign * phase_x) # Shape: [out_W, W]
-    
-    # =======================================================
-    # 4. 极速矩阵连乘 (避免大张量)
-    # [out_H, H] @ [A, C, H, W] -> [A, C, out_H, W]
-    # =======================================================
+
+    K_y = torch.exp(1j * sign * phase_y)
+    K_x = torch.exp(1j * sign * phase_x)
+
     temp = torch.matmul(K_y, blur_freq)
-    
-    # [A, C, out_H, W] @ [W, out_W] -> [A, C, out_H, out_W]
+
     psf_roi_complex = torch.matmul(temp, K_x.T)
-    
-    # =======================================================
-    # 5. 能量归一化
-    # =======================================================
+
     if is_ifft:
         psf_roi_complex = psf_roi_complex / (H * W)
-        
-    return psf_roi_complex
 
-# 最终你可以直接求平方得到强度：
-# psf_intensity = torch.abs(psf_roi_complex)**2
+    return psf_roi_complex
 
 
 if __name__ == "__main__":
     import tifffile,os,time
 
 
-    # parameter 1
+    # oil parameters
     Nnum = 15
     lfpsf_shape = (Nnum, Nnum, 1, 375, 375)
     OSR=3
@@ -977,7 +808,24 @@ if __name__ == "__main__":
     psf_binning = 1
 
 
-    # # parameter 2
+    # water parameters
+    Nnum = 13
+    lfpsf_shape = (Nnum, Nnum, 1, 777, 777)
+    OSR=3
+    M=15.75
+    n=1.333
+    na_detection=1.0
+    MLPitch=48.88e-6
+    fml=383.7e-6
+    lam_detection=525*1e-9
+    dz=1e-6
+    device = 'cuda:0'
+    xy_downsample = 3
+    psf_binning = 1
+
+
+    # air parameters (active when running this file directly)
+    Nnum = 15
     lfpsf_shape = (Nnum, Nnum, 1, 525, 525)
     OSR= 3
     M=7.85
@@ -1001,7 +849,7 @@ if __name__ == "__main__":
         -6.3695e-02]
     # input_views = [112, 113, 128, 127, 126, 111, 96, 97, 98, 99, 114, 129, 144, 143, 142, 141, 140, 125, 110, 95, 80, 81, 82, 83, 84, 85, 100, 115, 130, 145, 160, 159, 158, 157, 156, 155, 154, 139, 124, 109, 94, 79, 64, 65, 66, 67, 68, 69, 70, 71, 86, 101, 116, 131, 146, 161, 175, 174, 173, 172, 171, 170, 169, 153, 138, 123, 108, 93, 78, 63, 49, 50, 51, 52, 53, 54, 55, 117, 187, 107, 37]
     # wf = None
-    input_views = list(range(225))
+    input_views = list(range(Nnum*Nnum))
     # input_views = input_views[0:1]
     # input_views = [32]
     t0 = time.time()
@@ -1041,7 +889,7 @@ if __name__ == "__main__":
     #     single_point = torch.cat((single_point, tmp.cpu()), dim=-3)
     #     shift_int = torch.cat((shift_int, shift_int_tmp), dim=-2)
 
-    blksize = 11
+    blksize = 5  # Keep all 225 views within 24 GB of GPU memory.
     shift_int, single_point = lfpsf.incoherent_psf(aa, z_range[0:blksize], wf, normalized=True, piston_tip_tilt=True, psf_binning=psf_binning)
     # single_point = single_point.cpu()
     for blk in range(1, (len(z_range)-1) // blksize + 1):

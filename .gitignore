@@ -8,4 +8,12 @@ venv/
 Thumbs.db
 Desktop.ini
 *.log
-/github.zip
+*.zip
+data/*
+!data/README.md
+!data/demo/
+data/demo/*
+!data/demo/lf.tiff
+!data/demo/lf_clean.tiff
+!data/demo/wf_true.txt
+!data/demo/noise.json
