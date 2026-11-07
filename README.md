@@ -20,14 +20,8 @@ views at a peak signal of 100 photons. It runs 2,400 optimization steps
 and saves the reconstructed volume, wavefront, reprojected images, and error metrics
 to `outputs/demo_wavefront/`. Running it again overwrites these outputs.
 
-The demo follows the paper's joint estimation method for Fig. 3(a-e): nominal-PSF
-refocusing for initialization, nonnegative sensitivity-scaled object updates, and
-Adam wavefront updates. The fit uses the Poisson-Gaussian quasi-deviance, an XY
-curvature prior, and Gaussian blur stages of 4, 2, 1, and 0 pixels. Step sizes stay
-fixed throughout. A fixed seed reproduces the paper's view order.
-
-For the bundled bead demo, a full run reproduces the paper's archived
-wavefront RMS error of approximately **0.013328 waves** and clean light-field
+For the bead demo, a full run reproduces wavefront RMS error of 
+approximately **0.013328 waves** and clean light-field
 relative L2 error of **7.79218%**. Validated with the pinned dependencies on an
 RTX 3090: about 6.3 minutes for the full run. Small floating-point differences
 may occur across environments.

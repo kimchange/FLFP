@@ -3,15 +3,14 @@
 Only the files needed for the synthetic bead demo are included. The full datasets
 will be released after the paper is accepted.
 
-| File in `demo/` | Description |
-| --- | --- |
-| `lf.tiff` | Raw noisy light-field observations, `[view, y, x] = [81, 135, 135]` |
-| `lf_clean.tiff` | Clean light-field reference in original optical intensity units |
-| `wf_true.txt` | 21 reference wavefront coefficients in waves |
-| `noise.json` | Simulation metadata and intensity scale |
+| File in`demo/`  | Description                                                          |
+| ----------------- | -------------------------------------------------------------------- |
+| `lf.tiff`       | Raw noisy light-field observations,`[view, y, x] = [81, 135, 135]` |
+| `lf_clean.tiff` | Clean light-field reference in original optical intensity units      |
+| `wf_true.txt`   | 21 reference wavefront coefficients in waves                         |
+| `noise.json`    | Simulation metadata and intensity scale                              |
 
-The demo uses a peak expected signal of 100 photons and follows the configuration
-in paper Fig. 3(a-e).
+
 The reconstruction grid is `[z, y, x] = [101, 675, 675]`, with voxel spacing
 `[5, 0.47898089, 0.47898089]` micrometers.
 
